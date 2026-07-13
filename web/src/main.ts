@@ -1,5 +1,14 @@
-import { golf, type AggressiveOptions } from "./golfer";
-import { ShaderRunner, type RenderError } from "./renderer";
+import { golf, type AggressiveOptions, type GolfResult } from "./golfer";
+import {
+  ShaderRunner,
+  MultiPassRunner,
+  type RenderError,
+  type MultiPassError,
+  type PassSource,
+  type PassId,
+  type BufferSlot,
+  type ChannelWiring,
+} from "./renderer";
 import { initWasmGolfer, wasmGolf } from "./wasmGolfer";
 
 // Prefer the wasm build of the actual Rust engine — same code as the
@@ -17,7 +26,7 @@ const wasmReady = initWasmGolfer()
     console.warn("wasm engine unavailable, falling back to the TypeScript port:", err);
   });
 
-const DEFAULT_SHADER = `void mainImage( out vec4 fragColor, in vec2 fragCoord )
+const DEFAULT_IMAGE_CODE = `void mainImage( out vec4 fragColor, in vec2 fragCoord )
 {
     // Normalized pixel coordinates (from 0 to 1)
     vec2 uv = fragCoord/iResolution.xy;
@@ -30,12 +39,67 @@ const DEFAULT_SHADER = `void mainImage( out vec4 fragColor, in vec2 fragCoord )
 }`;
 
 // ---------------------------------------------------------------------
-// Layout: a fixed-viewport "no scroll" dashboard (see ROADMAP-UI.md).
-// Three columns (source / golfé / viewport) sit side by side inside
-// `#workspace`, resizable via the two `.resizer` handles, and collapse
-// into a single-panel tab view under a width/height breakpoint (CSS
-// media query in style.css) — `#tab-bar` is only visible in that mode.
+// Project model — a Shadertoy-shaped project: shared "Common" code, up
+// to 4 feedback/composable buffers (A-D), and the final "Image" pass.
+// Each buffer/Image has 4 iChannel slots that can be wired to any
+// *active* buffer's output (texture/video/audio/webcam/cubemap channel
+// types aren't supported yet — wiring UI only offers "None" or another
+// buffer). See ROADMAP.md for what's intentionally out of scope this
+// round.
 // ---------------------------------------------------------------------
+type BufferId = "common" | BufferSlot | "image";
+const BUFFER_SLOTS: BufferSlot[] = ["bufferA", "bufferB", "bufferC", "bufferD"];
+const BUFFER_LABELS: Record<BufferId, string> = {
+  common: "Common",
+  bufferA: "Buffer A",
+  bufferB: "Buffer B",
+  bufferC: "Buffer C",
+  bufferD: "Buffer D",
+  image: "Image",
+};
+
+interface PassState {
+  code: string;
+  channels: ChannelWiring[];
+}
+
+function emptyChannels(): ChannelWiring[] {
+  return [{ kind: "none" }, { kind: "none" }, { kind: "none" }, { kind: "none" }];
+}
+
+let common = "";
+let imageState: PassState = { code: DEFAULT_IMAGE_CODE, channels: emptyChannels() };
+let bufferStates: Partial<Record<BufferSlot, PassState>> = {};
+let currentTab: BufferId = "image";
+
+function activeSlots(): BufferSlot[] {
+  return BUFFER_SLOTS.filter((id) => bufferStates[id]);
+}
+
+function allTabs(): BufferId[] {
+  return ["common", ...activeSlots(), "image"];
+}
+
+function getPassState(id: BufferId): PassState | { code: string; channels: null } {
+  if (id === "common") return { code: common, channels: null };
+  if (id === "image") return imageState;
+  return bufferStates[id]!;
+}
+
+function setCurrentCode(code: string): void {
+  if (currentTab === "common") common = code;
+  else if (currentTab === "image") imageState.code = code;
+  else bufferStates[currentTab]!.code = code;
+}
+
+/** Every pass whose full source is `common + "\n" + own code` — i.e. everything except "common" itself. */
+function compilablePasses(): { id: Exclude<BufferId, "common">; state: PassState }[] {
+  return [
+    ...activeSlots().map((id) => ({ id, state: bufferStates[id]! })),
+    { id: "image" as const, state: imageState },
+  ];
+}
+
 const app = document.getElementById("app")!;
 app.innerHTML = `
   <div class="shell">
@@ -56,9 +120,8 @@ app.innerHTML = `
 
     <div class="workspace" id="workspace">
       <section class="panel active-tab" id="panel-source" data-panel="source">
-        <div class="panel-head">
-          <div class="panel-title"><span class="dot amber"></span>Source (déroulé)</div>
-        </div>
+        <div class="buffer-tabs" id="buffer-tabs"></div>
+        <div class="channel-row" id="channel-row" hidden></div>
         <div class="editor">
           <div class="gutter" id="gutter"></div>
           <textarea id="source" spellcheck="false"></textarea>
@@ -68,6 +131,8 @@ app.innerHTML = `
             <input type="checkbox" id="aggressive-toggle" />
             Golf agressif
           </label>
+          <button class="btn ghost small" id="import-btn" type="button" title="Importer un projet multi-buffer depuis une URL Shadertoy (nécessite une clé API Shadertoy gratuite)">⇩ Shadertoy</button>
+          <button class="btn ghost small" id="export-btn" type="button" title="Exporter le projet courant au format JSON Shadertoy">⇧ Export</button>
           <button class="btn ghost small" id="passes-btn" type="button" aria-haspopup="true" aria-expanded="false" title="Choisir individuellement les passes actives">⚙ Passes</button>
           <button class="btn ghost" id="reset-btn" type="button">Réinitialiser</button>
           <button class="btn primary" id="run-btn" type="button">Exécuter le golfing</button>
@@ -78,8 +143,8 @@ app.innerHTML = `
 
       <section class="panel" id="panel-golfed" data-panel="golfed">
         <div class="panel-head">
-          <div class="panel-title"><span class="dot cyan"></span>Golfé (validé au rendu)</div>
-          <label class="pretty-toggle" title="Réaffiche le code golfé sur plusieurs lignes indentées pour la lecture, sans changer le résultat réel : ce qui est copié et ce qui est rendu dans le viewport restent la version minifiée telle quelle.">
+          <div class="panel-title"><span class="dot cyan"></span>Golfé — <span id="golfed-tab-label">Image</span></div>
+          <label class="pretty-toggle" title="Réaffiche le code golfé sur plusieurs lignes indentées pour la lecture, sans changer le résultat réel : ce qui est copié et ce qui tourne dans le viewport reste la version minifiée.">
             <input type="checkbox" id="pretty-toggle" />
             Version justifiée
           </label>
@@ -89,7 +154,7 @@ app.innerHTML = `
 
         <div class="meter-block">
           <div class="meter-row">
-            <span class="meter-label">Réduction</span>
+            <span class="meter-label">Réduction totale</span>
             <div class="meter-ticks" id="ticks"></div>
             <span class="meter-value" id="ratio-value">0%</span>
           </div>
@@ -107,6 +172,7 @@ app.innerHTML = `
             <span><b id="c-merged">0</b> déclarations fusionnées</span>
             <span><b id="c-braces">0</b> blocs d'accolades supprimés</span>
           </div>
+          <div class="stat-strip" id="per-pass-stats"></div>
         </div>
 
         <div class="error-banner" id="error-banner"></div>
@@ -167,7 +233,10 @@ app.innerHTML = `
 
 const source = document.getElementById("source") as HTMLTextAreaElement;
 const gutter = document.getElementById("gutter")!;
+const bufferTabsEl = document.getElementById("buffer-tabs")!;
+const channelRowEl = document.getElementById("channel-row") as HTMLElement;
 const output = document.getElementById("output")!;
+const golfedTabLabel = document.getElementById("golfed-tab-label")!;
 const ticks = document.getElementById("ticks")!;
 const ratioValue = document.getElementById("ratio-value")!;
 const cIn = document.getElementById("c-in")!;
@@ -181,6 +250,7 @@ const cFolded = document.getElementById("c-folded")!;
 const cCompound = document.getElementById("c-compound")!;
 const cBraces = document.getElementById("c-braces")!;
 const cMerged = document.getElementById("c-merged")!;
+const perPassStats = document.getElementById("per-pass-stats")!;
 const aggressiveToggle = document.getElementById("aggressive-toggle") as HTMLInputElement;
 const passDeadLocals = document.getElementById("pass-dead-locals") as HTMLInputElement;
 const passDeadStores = document.getElementById("pass-dead-stores") as HTMLInputElement;
@@ -191,6 +261,8 @@ const passBraces = document.getElementById("pass-braces") as HTMLInputElement;
 const passCheckboxes = [passDeadLocals, passDeadStores, passFoldConstants, passCompound, passMerge, passBraces];
 const passesBtn = document.getElementById("passes-btn") as HTMLButtonElement;
 const passesPopover = document.getElementById("passes-popover") as HTMLElement;
+const importBtn = document.getElementById("import-btn") as HTMLButtonElement;
+const exportBtn = document.getElementById("export-btn") as HTMLButtonElement;
 const engineLabelEl = document.getElementById("engine-label")!;
 const errorBanner = document.getElementById("error-banner")!;
 const runBtn = document.getElementById("run-btn") as HTMLButtonElement;
@@ -233,15 +305,9 @@ function syncGutter(): void {
  * Purely cosmetic re-indentation of already-golfed code for the "Version
  * justifiée" display toggle — breaks the one-liner back onto multiple
  * indented lines after `;`/`{`/`}` so it reads like normal code. Never
- * touches the actual golfed string: what gets compiled (`runner.load`)
- * and what gets copied (`copyBtn`) always stay the true minified output,
- * this only changes what `output.textContent` shows.
- *
- * Brace/paren tracking is enough here (not a full parser) because the
- * input is guaranteed well-formed GLSL already produced by the golfer —
- * this isn't re-validating syntax, just re-inserting the whitespace the
- * golfer stripped. `parenDepth` guards `for(a;b;c)` headers so the `;`
- * inside them doesn't break the line.
+ * touches the actual golfed string: what gets compiled and what gets
+ * copied always stay the true minified output, this only changes what
+ * `output.textContent` shows.
  */
 function prettyPrintGolfed(code: string): string {
   let out = "";
@@ -279,50 +345,176 @@ function prettyPrintGolfed(code: string): string {
     .trim();
 }
 
-source.addEventListener("input", syncGutter);
+source.addEventListener("input", () => {
+  setCurrentCode(source.value);
+  syncGutter();
+});
 source.addEventListener("scroll", () => {
   gutter.scrollTop = source.scrollTop;
 });
 
-let runner: ShaderRunner | null = null;
+// ---------------------------------------------------------------------
+// Buffer tabs (Common / Buffer A-D / Image) + per-pass channel wiring.
+// ---------------------------------------------------------------------
+function renderChannelRow(): void {
+  if (currentTab === "common") {
+    channelRowEl.hidden = true;
+    channelRowEl.innerHTML = "";
+    return;
+  }
+  const state = getPassState(currentTab) as PassState;
+  const options = activeSlots();
+  channelRowEl.hidden = false;
+  channelRowEl.innerHTML = state.channels
+    .map((ch, i) => {
+      const opts = [`<option value="none"${ch.kind === "none" ? " selected" : ""}>aucune</option>`]
+        .concat(
+          options
+            .filter((slot) => slot !== currentTab || true) // self-reference (feedback) is allowed
+            .map(
+              (slot) =>
+                `<option value="${slot}"${ch.kind === "buffer" && ch.id === slot ? " selected" : ""}>${BUFFER_LABELS[slot]}</option>`,
+            ),
+        )
+        .join("");
+      return `<label>iChannel${i} <select data-channel-index="${i}">${opts}</select></label>`;
+    })
+    .join("");
+  channelRowEl.querySelectorAll<HTMLSelectElement>("select[data-channel-index]").forEach((sel) => {
+    sel.addEventListener("change", () => {
+      const idx = Number(sel.dataset.channelIndex);
+      const wiring: ChannelWiring = sel.value === "none" ? { kind: "none" } : { kind: "buffer", id: sel.value as BufferSlot };
+      (getPassState(currentTab) as PassState).channels[idx] = wiring;
+    });
+  });
+}
+
+function renderBufferTabs(): void {
+  const tabs = allTabs();
+  bufferTabsEl.innerHTML =
+    tabs
+      .map((id) => {
+        const removable = BUFFER_SLOTS.includes(id as BufferSlot);
+        const closeBtn = removable ? `<span class="buffer-tab-close" data-remove="${id}" title="Retirer ce buffer">✕</span>` : "";
+        return `<button class="buffer-tab-btn${id === currentTab ? " active" : ""}" data-buffer-tab="${id}" type="button">${BUFFER_LABELS[id]}${closeBtn}</button>`;
+      })
+      .join("") +
+    (activeSlots().length < BUFFER_SLOTS.length
+      ? `<button class="buffer-tab-add" id="add-buffer-btn" type="button" title="Ajouter un buffer">+ Buffer</button>`
+      : "");
+
+  bufferTabsEl.querySelectorAll<HTMLButtonElement>("[data-buffer-tab]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      if ((e.target as HTMLElement).closest("[data-remove]")) return;
+      switchTab(btn.dataset.bufferTab as BufferId);
+    });
+  });
+  bufferTabsEl.querySelectorAll<HTMLElement>("[data-remove]").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      removeBuffer(el.dataset.remove as BufferSlot);
+    });
+  });
+  const addBtn = document.getElementById("add-buffer-btn");
+  addBtn?.addEventListener("click", addBuffer);
+}
+
+function switchTab(id: BufferId): void {
+  currentTab = id;
+  source.value = getPassState(id).code;
+  syncGutter();
+  renderBufferTabs();
+  renderChannelRow();
+  golfedTabLabel.textContent = BUFFER_LABELS[id];
+  renderOutput();
+}
+
+function addBuffer(): void {
+  const free = BUFFER_SLOTS.find((id) => !bufferStates[id]);
+  if (!free) return;
+  bufferStates[free] = { code: "", channels: emptyChannels() };
+  switchTab(free);
+}
+
+function removeBuffer(id: BufferSlot): void {
+  delete bufferStates[id];
+  // Any other pass wired to the removed buffer would otherwise silently
+  // reference a slot that no longer exists — reset those to "none"
+  // rather than leaving a dangling reference.
+  for (const pass of [...activeSlots().map((s) => bufferStates[s]!), imageState]) {
+    pass.channels = pass.channels.map((ch) => (ch.kind === "buffer" && ch.id === id ? { kind: "none" } : ch));
+  }
+  if (currentTab === id) switchTab("image");
+  else {
+    renderBufferTabs();
+    renderChannelRow();
+  }
+}
+
+// ---------------------------------------------------------------------
+// Rendering: MultiPassRunner (WebGL2) with a ShaderRunner (WebGL1/2,
+// single-pass) fallback for browsers without WebGL2 — multi-buffer
+// projects simply can't run there, but a plain Image-only project still
+// renders (any channel wired to a buffer reads black, same graceful
+// degradation `ShaderRunner` already does for iChannel0-3).
+// ---------------------------------------------------------------------
+let mpRunner: MultiPassRunner | null = null;
+let legacyRunner: ShaderRunner | null = null;
+let mpSourceRunner: MultiPassRunner | null = null;
+let legacySourceRunner: ShaderRunner | null = null;
+const compatMode = { active: false };
+
+function reportError(err: RenderError | MultiPassError | null): void {
+  if (!err) {
+    errorBanner.classList.remove("visible");
+    errorBanner.textContent = "";
+    return;
+  }
+  errorBanner.classList.add("visible");
+  const passLabel = "passId" in err ? `${BUFFER_LABELS[err.passId as BufferId]} / ${err.stage}` : err.stage;
+  errorBanner.textContent = `Erreur de compilation (${passLabel}) :\n${err.log}`;
+}
+
 try {
-  runner = new ShaderRunner(canvas);
-  runner.onFps = (fps) => {
+  mpRunner = new MultiPassRunner(canvas);
+  mpRunner.onFps = (fps) => {
     fpsValue.textContent = fps.toFixed(0);
   };
-  runner.onError = (err: RenderError | null) => {
-    if (!err) {
-      errorBanner.classList.remove("visible");
-      errorBanner.textContent = "";
-      return;
-    }
-    errorBanner.classList.add("visible");
-    errorBanner.textContent = `Erreur de compilation (${err.stage}) :\n${err.log}`;
-  };
-  runner.start();
+  mpRunner.onError = reportError;
+  mpRunner.start();
 } catch (e) {
-  errorBanner.classList.add("visible");
-  errorBanner.textContent = String(e);
+  console.warn("WebGL2 multi-pass unavailable, falling back to single-pass WebGL1/2:", e);
+  compatMode.active = true;
+  try {
+    legacyRunner = new ShaderRunner(canvas);
+    legacyRunner.onFps = (fps) => {
+      fpsValue.textContent = fps.toFixed(0);
+    };
+    legacyRunner.onError = reportError;
+    legacyRunner.start();
+  } catch (e2) {
+    errorBanner.classList.add("visible");
+    errorBanner.textContent = String(e2);
+  }
 }
 
 function resizeCanvas(): void {
   const rect = viewportFrame.getBoundingClientRect();
-  runner?.resize(rect.width, rect.height || 440);
+  mpRunner?.resize(rect.width, rect.height || 440);
+  legacyRunner?.resize(rect.width, rect.height || 440);
   resValue.textContent = `${canvas.width}×${canvas.height}`;
-  if (sourceRunner) {
+  if (mpSourceRunner || legacySourceRunner) {
     const srcRect = frameSource.getBoundingClientRect();
-    sourceRunner.resize(srcRect.width, srcRect.height || 440);
+    mpSourceRunner?.resize(srcRect.width, srcRect.height || 440);
+    legacySourceRunner?.resize(srcRect.width, srcRect.height || 440);
   }
 }
 window.addEventListener("resize", resizeCanvas);
 
 // ---------------------------------------------------------------------
-// Tab mode (narrow viewports): only one of the 3 panels is shown at a
-// time, switched via `#tab-bar` (hidden by CSS on wide desktop layouts,
-// where all 3 panels are visible simultaneously side by side — see the
-// "no scroll" layout in style.css / ROADMAP-UI.md). `.active-tab` is
-// what CSS keys off under the narrow-viewport media query; harmless to
-// toggle even when that media query isn't active.
+// Tab mode (narrow viewports): only one of the 3 top-level panels is
+// shown at a time, switched via `#tab-bar` (hidden by CSS on wide
+// desktop layouts). Not to be confused with the buffer tabs above.
 // ---------------------------------------------------------------------
 const tabPanels: Record<string, HTMLElement> = {
   source: panelSource,
@@ -339,10 +531,7 @@ tabButtons.forEach((b) => b.addEventListener("click", () => setActiveTab(b.datas
 
 // ---------------------------------------------------------------------
 // Resizable columns (desktop 3-column layout only — hidden by CSS in
-// tab mode). Widths are pixel-based for the source/golfé columns; the
-// viewport column always takes the remaining space (`1fr`), so it never
-// gets crushed to 0 by an overzealous drag. Persisted to localStorage so
-// a chosen layout survives a reload.
+// tab mode).
 // ---------------------------------------------------------------------
 const COLUMN_STORAGE_KEY = "glslgolf-columns";
 const MIN_COLUMN_WIDTH = 240;
@@ -429,11 +618,7 @@ makeResizer(resizer1, 1);
 makeResizer(resizer2, 2);
 
 // ---------------------------------------------------------------------
-// Aggressive-passes popover — replaces the old inline <details> block,
-// which used to push the "Exécuter le golfing" button down whenever it
-// was opened (bad in a fixed-height, no-scroll layout with a limited
-// vertical budget). `position: fixed` (see style.css) lets it escape
-// `.panel`'s `overflow: hidden` instead of getting clipped.
+// Aggressive-passes popover.
 // ---------------------------------------------------------------------
 function closePopover(): void {
   passesPopover.hidden = true;
@@ -458,23 +643,20 @@ document.addEventListener("keydown", (e) => {
 });
 window.addEventListener("resize", closePopover);
 
-// Comparison mode: a second, independent ShaderRunner rendering the
-// *un-golfed* source side-by-side with the golfed one — the only way
-// this app can catch the most dangerous failure mode of a structural
-// golf pass: it compiles fine, but silently renders something
-// different. Created lazily on first use (skips opening a second WebGL
-// context for users who never touch this) and left running afterwards
-// rather than torn down, since toggling compare mode on and off
-// repeatedly is the expected way to use it.
-let sourceRunner: ShaderRunner | null = null;
-
+// Comparison mode: a second, independent runner rendering the *un-
+// golfed* project side-by-side with the golfed one.
 function setCompareMode(on: boolean): void {
   frameSource.hidden = !on;
   labelGolfed.hidden = !on;
-  if (on && !sourceRunner) {
+  if (on && !mpSourceRunner && !legacySourceRunner) {
     try {
-      sourceRunner = new ShaderRunner(canvasSource);
-      sourceRunner.start();
+      if (compatMode.active) {
+        legacySourceRunner = new ShaderRunner(canvasSource);
+        legacySourceRunner.start();
+      } else {
+        mpSourceRunner = new MultiPassRunner(canvasSource);
+        mpSourceRunner.start();
+      }
     } catch (e) {
       console.warn("comparison viewport unavailable:", e);
       frameSource.hidden = true;
@@ -498,7 +680,7 @@ function currentAggressiveOptions(): AggressiveOptions {
   };
 }
 
-/** Keeps the master "Golf agressif" checkbox in sync with the 6 individual passes: checked only when all are on, indeterminate when some (but not all) are. */
+/** Keeps the master "Golf agressif" checkbox in sync with the 6 individual passes. */
 function syncMasterToggle(): void {
   const states = passCheckboxes.map((cb) => cb.checked);
   const allOn = states.every(Boolean);
@@ -507,78 +689,129 @@ function syncMasterToggle(): void {
   aggressiveToggle.indeterminate = anyOn && !allOn;
 }
 
-let lastGolfedCode = "";
+let lastResults: Partial<Record<Exclude<BufferId, "common">, GolfResult>> = {};
 
-/** Renders `lastGolfedCode` into the output panel, reformatted if "Version justifiée" is checked. Display-only — never touches `lastGolfedCode` itself. */
+/** Renders the currently selected tab's golfed code, reformatted if "Version justifiée" is checked. */
 function renderOutput(): void {
-  output.textContent = prettyToggle.checked ? prettyPrintGolfed(lastGolfedCode) : lastGolfedCode;
+  if (currentTab === "common") {
+    output.innerHTML =
+      '<span class="placeholder">— "Common" est fusionné dans chaque buffer/Image au golfing, il n\'a pas de sortie indépendante —</span>';
+    return;
+  }
+  const result = lastResults[currentTab as Exclude<BufferId, "common">];
+  if (!result) {
+    output.innerHTML = '<span class="placeholder">— exécutez le golfing pour voir le résultat —</span>';
+    return;
+  }
+  output.textContent = prettyToggle.checked ? prettyPrintGolfed(result.code) : result.code;
 }
 
-function runGolf(): void {
-  const src = source.value;
+function golfProject(): void {
   const options = currentAggressiveOptions();
-  const result = golfImpl(src, options);
-
-  lastGolfedCode = result.code;
+  const passes = compilablePasses();
+  lastResults = {};
+  for (const p of passes) {
+    lastResults[p.id] = golfImpl(common + "\n" + p.state.code, options);
+  }
   renderOutput();
-  cIn.textContent = String(result.stats.inputChars);
-  cOut.textContent = String(result.stats.outputChars);
-  cRenamed.textContent = String(result.stats.renamedCount);
-  cNumbers.textContent = String(result.stats.numbersShortened);
+
+  const totalIn = passes.reduce((s, p) => s + lastResults[p.id]!.stats.inputChars, 0);
+  const totalOut = passes.reduce((s, p) => s + lastResults[p.id]!.stats.outputChars, 0);
+  const totalRenamed = passes.reduce((s, p) => s + lastResults[p.id]!.stats.renamedCount, 0);
+  const totalNumbers = passes.reduce((s, p) => s + lastResults[p.id]!.stats.numbersShortened, 0);
+  cIn.textContent = String(totalIn);
+  cOut.textContent = String(totalOut);
+  cRenamed.textContent = String(totalRenamed);
+  cNumbers.textContent = String(totalNumbers);
 
   aggressiveStatsRow.hidden = !Object.values(options).some(Boolean);
-  cDead.textContent = String(result.stats.aggressive.deadLocalsRemoved);
-  cStores.textContent = String(result.stats.aggressive.deadStoresRemoved);
-  cFolded.textContent = String(result.stats.aggressive.constantsFolded);
-  cCompound.textContent = String(result.stats.aggressive.compoundAssignments);
-  cMerged.textContent = String(result.stats.aggressive.declarationsMerged);
-  cBraces.textContent = String(result.stats.aggressive.bracesRemoved);
+  const sumAgg = (key: keyof GolfResult["stats"]["aggressive"]) =>
+    passes.reduce((s, p) => s + (lastResults[p.id]!.stats.aggressive[key] as number), 0);
+  cDead.textContent = String(sumAgg("deadLocalsRemoved"));
+  cStores.textContent = String(sumAgg("deadStoresRemoved"));
+  cFolded.textContent = String(sumAgg("constantsFolded"));
+  cCompound.textContent = String(sumAgg("compoundAssignments"));
+  cMerged.textContent = String(sumAgg("declarationsMerged"));
+  cBraces.textContent = String(sumAgg("bracesRemoved"));
 
-  const pct = Math.max(0, Math.min(100, result.stats.reductionPct));
+  perPassStats.innerHTML = passes
+    .map((p) => {
+      const r = lastResults[p.id]!;
+      const pct = r.stats.inputChars === 0 ? 0 : ((r.stats.inputChars - r.stats.outputChars) / r.stats.inputChars) * 100;
+      return `<span>${BUFFER_LABELS[p.id]} : <b>${r.stats.inputChars}</b>→<b>${r.stats.outputChars}</b> (${pct.toFixed(0)}%)</span>`;
+    })
+    .join("");
+
+  const pct = totalIn === 0 ? 0 : Math.max(0, Math.min(100, ((totalIn - totalOut) / totalIn) * 100));
   ratioValue.textContent = `${pct.toFixed(1)}%`;
   const litCount = Math.round((pct / 100) * TICK_COUNT);
   Array.from(ticks.children).forEach((el, i) => {
     el.classList.toggle("lit", i < litCount);
   });
 
-  const golfedOk = runner?.load(result.code) ?? true;
-  if (!golfedOk && runner) {
-    // The golfed code failed — figure out whether the source was
-    // already broken beforehand, so the banner doesn't leave the user
-    // guessing whether it's their shader or the golfer's fault.
-    const sourceErr = runner.tryCompile(src);
+  const golfedPassSources: PassSource[] = passes.map((p) => ({
+    id: p.id as PassId,
+    code: lastResults[p.id]!.code,
+    channels: p.state.channels,
+  }));
+  const rawPassSources: PassSource[] = passes.map((p) => ({
+    id: p.id as PassId,
+    code: common + "\n" + p.state.code,
+    channels: p.state.channels,
+  }));
+
+  let golfedOk: boolean;
+  if (compatMode.active) {
+    const imageGolfed = lastResults["image"];
+    golfedOk = legacyRunner?.load(imageGolfed?.code ?? "") ?? true;
+    if (activeSlots().length > 0) {
+      errorBanner.classList.add("visible");
+      errorBanner.textContent =
+        (errorBanner.textContent ? errorBanner.textContent + "\n\n" : "") +
+        "WebGL2 indisponible sur ce navigateur : les buffers A-D ne peuvent pas être rendus (repli sur Image seul, tout iChannel qui leur est câblé lit du noir).";
+    }
+  } else {
+    golfedOk = mpRunner?.load(golfedPassSources) ?? true;
+  }
+
+  if (!golfedOk && !compatMode.active && mpRunner) {
+    const sourceErr = mpRunner.tryCompile(rawPassSources);
     const note = sourceErr
-      ? "\n\n(Le shader source ne compile pas non plus — le golf n'y est pour rien.)"
-      : "\n\n(Le shader source compile correctement : c'est le golf qui a cassé ce résultat — merci de signaler ce cas.)";
+      ? "\n\n(Le projet source ne compile pas non plus — le golf n'y est pour rien.)"
+      : "\n\n(Le projet source compile correctement : c'est le golf qui a cassé ce résultat — merci de signaler ce cas.)";
     errorBanner.textContent = (errorBanner.textContent ?? "") + note;
   }
-  sourceRunner?.load(src);
+
+  if (compatMode.active) legacySourceRunner?.load(common + "\n" + imageState.code);
+  else mpSourceRunner?.load(rawPassSources);
   resizeCanvas();
 }
 
-runBtn.addEventListener("click", runGolf);
+runBtn.addEventListener("click", golfProject);
 aggressiveToggle.addEventListener("change", () => {
   passCheckboxes.forEach((cb) => (cb.checked = aggressiveToggle.checked));
   aggressiveToggle.indeterminate = false;
-  runGolf();
+  golfProject();
 });
 passCheckboxes.forEach((cb) =>
   cb.addEventListener("change", () => {
     syncMasterToggle();
-    runGolf();
+    golfProject();
   }),
 );
 resetBtn.addEventListener("click", () => {
-  source.value = DEFAULT_SHADER;
-  syncGutter();
-  runGolf();
+  common = "";
+  bufferStates = {};
+  imageState = { code: DEFAULT_IMAGE_CODE, channels: emptyChannels() };
+  switchTab("image");
+  golfProject();
 });
 prettyToggle.addEventListener("change", renderOutput);
 copyBtn.addEventListener("click", async () => {
-  // Always copies the true minified result, regardless of "Version
-  // justifiée" — the toggle is a reading aid, not an alternate output.
+  const result = lastResults[currentTab as Exclude<BufferId, "common">];
+  if (!result) return;
   try {
-    await navigator.clipboard.writeText(lastGolfedCode);
+    await navigator.clipboard.writeText(result.code);
     const original = copyBtn.textContent;
     copyBtn.textContent = "Copié !";
     setTimeout(() => (copyBtn.textContent = original), 1200);
@@ -590,16 +823,186 @@ copyBtn.addEventListener("click", async () => {
 let paused = false;
 pauseBtn.addEventListener("click", () => {
   paused = !paused;
-  runner?.setPaused(paused);
+  mpRunner?.setPaused(paused);
+  legacyRunner?.setPaused(paused);
   pauseBtn.textContent = paused ? "▶" : "⏸";
 });
 
-source.value = DEFAULT_SHADER;
+// ---------------------------------------------------------------------
+// Shadertoy import/export.
+//
+// Import needs the caller's own free Shadertoy API key (shadertoy.com/
+// myapps) — there's no way for this app to hold or share one. It's kept
+// in localStorage after the first prompt. Only "buffer" channel inputs
+// are reconstructed; texture/video/audio/webcam/cubemap/keyboard inputs
+// are dropped with a note, since this app doesn't render those channel
+// types yet (see ROADMAP.md). Shadertoy's API may also not send
+// permissive CORS headers for browser-side fetches from a third-party
+// origin like this one — if so, the fetch fails with a network error
+// rather than a clean "wrong key" message; there's no client-side fix
+// for that short of a server-side proxy.
+// ---------------------------------------------------------------------
+function extractShaderId(input: string): string | null {
+  const trimmed = input.trim();
+  const m = trimmed.match(/shadertoy\.com\/view\/([A-Za-z0-9]+)/);
+  if (m) return m[1];
+  if (/^[A-Za-z0-9]{6}$/.test(trimmed)) return trimmed;
+  return null;
+}
+
+interface ShadertoyInput {
+  id: string;
+  channel: number;
+  type: string;
+}
+interface ShadertoyOutput {
+  id: string;
+  channel: number;
+}
+interface ShadertoyRenderpass {
+  inputs: ShadertoyInput[];
+  outputs: ShadertoyOutput[];
+  code: string;
+  name: string;
+  type: string; // "image" | "buffer" | "common" | "sound" | "cubemap"
+}
+interface ShadertoyShader {
+  renderpass: ShadertoyRenderpass[];
+}
+
+async function importFromShadertoy(): Promise<void> {
+  const url = window.prompt("URL ou ID Shadertoy (ex: https://www.shadertoy.com/view/XsXXDn) :");
+  if (!url) return;
+  const id = extractShaderId(url);
+  if (!id) {
+    window.alert("ID Shadertoy introuvable dans ce texte.");
+    return;
+  }
+  let apiKey = localStorage.getItem("shadertoy-api-key");
+  if (!apiKey) {
+    apiKey = window.prompt("Clé API Shadertoy (gratuite — génère la tienne sur shadertoy.com/myapps) :");
+    if (!apiKey) return;
+    localStorage.setItem("shadertoy-api-key", apiKey);
+  }
+  try {
+    const res = await fetch(`https://www.shadertoy.com/api/v1/shaders/${id}?key=${encodeURIComponent(apiKey)}`);
+    const data = await res.json();
+    if (data.Error) {
+      window.alert("Erreur Shadertoy : " + data.Error);
+      return;
+    }
+    applyShadertoyShader(data.Shader as ShadertoyShader);
+  } catch (e) {
+    window.alert(
+      "Échec de l'import : " +
+        String(e) +
+        "\n\n(Si le message évoque CORS/réseau : l'API Shadertoy n'autorise peut-être pas les requêtes directes depuis ce site — pas de contournement possible côté navigateur.)",
+    );
+  }
+}
+
+function applyShadertoyShader(shader: ShadertoyShader): void {
+  const outputIdToSlot = new Map<string, BufferSlot>();
+  const bufferNameOrder: BufferSlot[] = ["bufferA", "bufferB", "bufferC", "bufferD"];
+  let nextSlot = 0;
+  for (const pass of shader.renderpass) {
+    if (pass.type === "buffer" && pass.outputs[0] && nextSlot < bufferNameOrder.length) {
+      outputIdToSlot.set(pass.outputs[0].id, bufferNameOrder[nextSlot]);
+      nextSlot++;
+    }
+  }
+
+  const unsupported: string[] = [];
+  function wireChannels(inputs: ShadertoyInput[], passName: string): ChannelWiring[] {
+    const channels = emptyChannels();
+    for (const inp of inputs) {
+      if (inp.type === "buffer" && outputIdToSlot.has(inp.id)) {
+        channels[inp.channel] = { kind: "buffer", id: outputIdToSlot.get(inp.id)! };
+      } else {
+        unsupported.push(`${passName} iChannel${inp.channel} : type "${inp.type}" non supporté, mis à "aucune".`);
+      }
+    }
+    return channels;
+  }
+
+  const newBufferStates: Partial<Record<BufferSlot, PassState>> = {};
+  let newImage: PassState = { code: "", channels: emptyChannels() };
+  let newCommon = "";
+  for (const pass of shader.renderpass) {
+    if (pass.type === "common") {
+      newCommon = pass.code;
+    } else if (pass.type === "image") {
+      newImage = { code: pass.code, channels: wireChannels(pass.inputs, "Image") };
+    } else if (pass.type === "buffer") {
+      const slot = pass.outputs[0] ? outputIdToSlot.get(pass.outputs[0].id) : undefined;
+      if (slot) newBufferStates[slot] = { code: pass.code, channels: wireChannels(pass.inputs, BUFFER_LABELS[slot]) };
+    } else {
+      unsupported.push(`Passe "${pass.name}" de type "${pass.type}" non supportée (son/cubemap), ignorée.`);
+    }
+  }
+
+  common = newCommon;
+  bufferStates = newBufferStates;
+  imageState = newImage;
+  switchTab("image");
+  golfProject();
+
+  if (unsupported.length > 0) {
+    window.alert("Import terminé avec des limitations :\n\n" + unsupported.join("\n"));
+  }
+}
+
+function exportToShadertoy(): void {
+  const passes: ShadertoyRenderpass[] = [];
+  if (common.trim()) {
+    passes.push({ code: common, name: "Common", type: "common", inputs: [], outputs: [] });
+  }
+  let bufIdx = 0;
+  for (const slot of activeSlots()) {
+    const state = bufferStates[slot]!;
+    passes.push({
+      code: state.code,
+      name: BUFFER_LABELS[slot],
+      type: "buffer",
+      outputs: [{ id: `367${bufIdx}`, channel: 0 }],
+      inputs: state.channels
+        .map((ch, i) =>
+          ch.kind === "buffer" ? { id: `367${activeSlots().indexOf(ch.id)}`, channel: i, type: "buffer" } : null,
+        )
+        .filter((x): x is ShadertoyInput => x !== null),
+    });
+    bufIdx++;
+  }
+  passes.push({
+    code: imageState.code,
+    name: "Image",
+    type: "image",
+    outputs: [{ id: "image", channel: 0 }],
+    inputs: imageState.channels
+      .map((ch, i) => (ch.kind === "buffer" ? { id: `367${activeSlots().indexOf(ch.id)}`, channel: i, type: "buffer" } : null))
+      .filter((x): x is ShadertoyInput => x !== null),
+  });
+
+  const json = JSON.stringify({ Shader: { info: { name: "Exported from GLSL Hyper-Golfer" }, renderpass: passes } }, null, 2);
+  const blob = new Blob([json], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "shadertoy-export.json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+importBtn.addEventListener("click", () => void importFromShadertoy());
+exportBtn.addEventListener("click", exportToShadertoy);
+
+renderBufferTabs();
+renderChannelRow();
+source.value = getPassState(currentTab).code;
 syncGutter();
 setActiveTab("source");
 resizeCanvas();
 syncMasterToggle();
 wasmReady.finally(() => {
   engineLabelEl.textContent = engineLabel;
-  runGolf();
+  golfProject();
 });

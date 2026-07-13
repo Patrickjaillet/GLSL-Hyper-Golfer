@@ -298,6 +298,101 @@ input {
 }
 
 /* ---------------------------------------------------------------------
+   Buffer tabs (Common / Buffer A-D / Image) + per-pass iChannel wiring
+   row, above the editor in the Source panel. Distinct from `.tab-bar`
+   (the outer Source/Golfé/Viewport tabs used only in narrow-viewport
+   mode) — these are always visible, they're how a multi-buffer project
+   is authored.
+--------------------------------------------------------------------- */
+.buffer-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+  flex-shrink: 0;
+}
+
+.buffer-tab-btn {
+  position: relative;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
+  color: var(--paper-dim);
+  background: transparent;
+  border: 1px solid var(--ink-line);
+  border-radius: var(--radius);
+  padding: 5px 20px 5px 10px;
+  cursor: pointer;
+}
+
+.buffer-tab-btn:hover {
+  color: var(--paper);
+  border-color: var(--cyan-dim);
+}
+
+.buffer-tab-btn.active {
+  color: var(--ink);
+  background: var(--amber);
+  border-color: var(--amber);
+}
+
+.buffer-tab-close {
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 9px;
+  opacity: 0.7;
+}
+
+.buffer-tab-close:hover {
+  opacity: 1;
+}
+
+.buffer-tab-add {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--paper-dim);
+  background: transparent;
+  border: 1px dashed var(--ink-line);
+  border-radius: var(--radius);
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.buffer-tab-add:hover {
+  color: var(--cyan);
+  border-color: var(--cyan-dim);
+}
+
+.channel-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-bottom: 8px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--paper-dim);
+  flex-shrink: 0;
+}
+
+.channel-row label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.channel-row select {
+  background: var(--ink);
+  color: var(--paper);
+  border: 1px solid var(--ink-line);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 2px 4px;
+}
+
+/* ---------------------------------------------------------------------
    Editor (source) — textarea + synced line-number gutter. Fills the
    remaining height of `.panel` instead of a fixed px height, so it
    grows/shrinks with whatever room the resizable columns give it;
@@ -376,6 +471,7 @@ textarea#source {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 10px;
   flex-shrink: 0;
