@@ -1,6 +1,6 @@
 use crate::aggressive::{
     compound_assignments, eliminate_dead_locals, eliminate_dead_stores, fold_constants,
-    merge_declarations, strip_redundant_braces, AggressiveStats, Item,
+    merge_declarations, reduce_constant_vectors, strip_redundant_braces, AggressiveStats, Item,
 };
 use crate::lexer::{tokenize_spaced, Tok};
 use crate::vocab::{
@@ -390,6 +390,7 @@ pub struct AggressiveOptions {
     pub eliminate_dead_locals: bool,
     pub eliminate_dead_stores: bool,
     pub fold_constants: bool,
+    pub reduce_constant_vectors: bool,
     pub compound_assignments: bool,
     pub merge_declarations: bool,
     pub strip_redundant_braces: bool,
@@ -401,6 +402,7 @@ impl AggressiveOptions {
             eliminate_dead_locals: true,
             eliminate_dead_stores: true,
             fold_constants: true,
+            reduce_constant_vectors: true,
             compound_assignments: true,
             merge_declarations: true,
             strip_redundant_braces: true,
@@ -412,6 +414,7 @@ impl AggressiveOptions {
             eliminate_dead_locals: false,
             eliminate_dead_stores: false,
             fold_constants: false,
+            reduce_constant_vectors: false,
             compound_assignments: false,
             merge_declarations: false,
             strip_redundant_braces: false,
@@ -554,6 +557,9 @@ pub fn golf_with_options(source: &str, aggressive: AggressiveOptions) -> GolfRes
     }
     if aggressive.fold_constants {
         items = fold_constants(items, &mut aggressive_stats);
+    }
+    if aggressive.reduce_constant_vectors {
+        items = reduce_constant_vectors(items, &mut aggressive_stats);
     }
     if aggressive.compound_assignments {
         items = compound_assignments(items, &mut aggressive_stats);
@@ -899,6 +905,60 @@ mod tests {
         assert_eq!(r.code, "x*=6;");
         assert_eq!(r.stats.aggressive.constants_folded, 1);
         assert_eq!(r.stats.aggressive.compound_assignments, 1);
+    }
+
+    #[test]
+    fn reduces_a_constant_vector_of_identical_literals() {
+        let r = golf("void f(){vec3 a=vec3(1.0,1.0,1.0);}", true);
+        assert_eq!(r.code, "void a(){vec3 b=vec3(1.);}");
+        assert_eq!(r.stats.aggressive.constant_vectors_reduced, 1);
+    }
+
+    #[test]
+    fn refuses_to_reduce_a_vector_of_differing_literals() {
+        let r = golf("void f(){vec3 a=vec3(1.0,2.0,1.0);}", true);
+        assert_eq!(r.code, "void a(){vec3 b=vec3(1.,2.,1.);}");
+        assert_eq!(r.stats.aggressive.constant_vectors_reduced, 0);
+    }
+
+    #[test]
+    fn refuses_to_reduce_a_vector_with_a_non_literal_argument() {
+        // `w` is not a numeric literal, so the "all N arguments are the
+        // exact same token" check can never hold — refusing here avoids
+        // ever needing to reason about whether two different expressions
+        // are semantically equal.
+        let r = golf("void f(float w){vec3 a=vec3(w,w,w);}", true);
+        assert_eq!(r.code, "void b(float a){vec3 c=vec3(a,a,a);}");
+        assert_eq!(r.stats.aggressive.constant_vectors_reduced, 0);
+    }
+
+    #[test]
+    fn reduces_constant_vec2_and_vec4() {
+        let r = golf("void f(){vec2 a=vec2(1.,1.);}", true);
+        assert_eq!(r.code, "void a(){vec2 b=vec2(1.);}");
+        assert_eq!(r.stats.aggressive.constant_vectors_reduced, 1);
+    }
+
+    #[test]
+    fn refuses_a_vector_with_more_arguments_than_its_arity() {
+        // 5 arguments to a vec4(...) isn't valid GLSL to begin with, but
+        // the pass must still not misfire on it: after matching 4
+        // identical literals it expects `)`, finds `,` instead, and
+        // bails out rather than guessing.
+        let r = golf("void f(){vec4 a=vec4(1.,1.,1.,1.,1.);}", true);
+        assert_eq!(r.code, "void a(){vec4 b=vec4(1.,1.,1.,1.,1.);}");
+        assert_eq!(r.stats.aggressive.constant_vectors_reduced, 0);
+    }
+
+    #[test]
+    fn folded_constants_feed_constant_vector_reduction() {
+        // fold_constants runs first, so `2*3` becomes `6` in every slot
+        // before reduce_constant_vectors ever looks at the arguments —
+        // `vec3(2*3,2*3,2*3)` -> `vec3(6,6,6)` -> `vec3(6)`.
+        let r = golf("void f(){vec3 a=vec3(2*3,2*3,2*3);}", true);
+        assert_eq!(r.code, "void a(){vec3 b=vec3(6);}");
+        assert_eq!(r.stats.aggressive.constants_folded, 3);
+        assert_eq!(r.stats.aggressive.constant_vectors_reduced, 1);
     }
 
     #[test]

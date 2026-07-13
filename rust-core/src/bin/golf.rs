@@ -39,10 +39,11 @@ fn main() -> ExitCode {
         result.stats.numbers_shortened,
         if aggressive {
             format!(
-                ", {} locaux morts supprimes, {} ecritures mortes supprimees, {} constantes repliees, {} affectations composees, {} declarations fusionnees, {} blocs d'accolades supprimes",
+                ", {} locaux morts supprimes, {} ecritures mortes supprimees, {} constantes repliees, {} vecteurs constants reduits, {} affectations composees, {} declarations fusionnees, {} blocs d'accolades supprimes",
                 result.stats.aggressive.dead_locals_removed,
                 result.stats.aggressive.dead_stores_removed,
                 result.stats.aggressive.constants_folded,
+                result.stats.aggressive.constant_vectors_reduced,
                 result.stats.aggressive.compound_assignments,
                 result.stats.aggressive.declarations_merged,
                 result.stats.aggressive.braces_removed,

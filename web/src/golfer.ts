@@ -527,6 +527,7 @@ export interface AggressiveStats {
   constantsFolded: number;
   deadLocalsRemoved: number;
   deadStoresRemoved: number;
+  constantVectorsReduced: number;
 }
 
 function newAggressiveStats(): AggressiveStats {
@@ -537,6 +538,7 @@ function newAggressiveStats(): AggressiveStats {
     constantsFolded: 0,
     deadLocalsRemoved: 0,
     deadStoresRemoved: 0,
+    constantVectorsReduced: 0,
   };
 }
 
@@ -704,6 +706,75 @@ function foldConstants(items: Token[], stats: AggressiveStats): Token[] {
       }
     }
 
+    out.push(items[i]);
+    i++;
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Constant vector reduction — `vec3(1.,1.,1.)` -> `vec3(1.)`. Safe by the
+// GLSL spec itself, not a heuristic: a vector constructor called with a
+// single scalar argument broadcasts that value to every component, which
+// is *by definition* the same value the N-argument form produces when all
+// N arguments are identical. Restricted to vec2/vec3/vec4 with plain
+// numeric-literal arguments (never an expression) so this is a pure
+// token-count-and-text-equality check — mirrors
+// `rust-core/src/aggressive.rs::reduce_constant_vectors` exactly,
+// including *not* handling negative literals (`-1.` tokenizes as a
+// separate `-` punct, not part of the number token).
+// ---------------------------------------------------------------------------
+
+const VEC_ARITY: Record<string, number> = { vec2: 2, vec3: 3, vec4: 4 };
+
+/** If `items[i..]` is `vecN(<lit>,...,<lit>)` with exactly N identical numeric-literal arguments, returns the closing `)` index and the index of the literal to keep. */
+function matchConstantVector(items: Token[], i: number): [number, number] | null {
+  const head = items[i];
+  if (!head || head.kind !== "ident") return null;
+  const arity = VEC_ARITY[head.text];
+  if (!arity) return null;
+  const openParen = items[i + 1];
+  if (!openParen || openParen.kind !== "punct" || openParen.text !== "(") return null;
+
+  let idx = i + 2;
+  let firstText: string | null = null;
+  let firstIdx = -1;
+  for (let k = 0; k < arity; k++) {
+    const tok = items[idx];
+    if (!tok || tok.kind !== "number") return null;
+    if (firstText === null) {
+      firstText = tok.text;
+      firstIdx = idx;
+    } else if (tok.text !== firstText) {
+      return null;
+    }
+    idx++;
+    if (k + 1 < arity) {
+      const comma = items[idx];
+      if (!comma || comma.kind !== "punct" || comma.text !== ",") return null;
+      idx++;
+    }
+  }
+  const close = items[idx];
+  if (!close || close.kind !== "punct" || close.text !== ")") return null;
+  return [idx, firstIdx];
+}
+
+function reduceConstantVectors(items: Token[], stats: AggressiveStats): Token[] {
+  const out: Token[] = [];
+  let i = 0;
+  while (i < items.length) {
+    const match = matchConstantVector(items, i);
+    if (match) {
+      const [closeIdx, valueIdx] = match;
+      out.push(items[i]);
+      out.push(items[i + 1]);
+      out.push(items[valueIdx]);
+      out.push(items[closeIdx]);
+      stats.constantVectorsReduced++;
+      i = closeIdx + 1;
+      continue;
+    }
     out.push(items[i]);
     i++;
   }
@@ -1372,6 +1443,7 @@ export interface AggressiveOptions {
   eliminateDeadLocals: boolean;
   eliminateDeadStores: boolean;
   foldConstants: boolean;
+  reduceConstantVectors: boolean;
   compoundAssignments: boolean;
   mergeDeclarations: boolean;
   stripRedundantBraces: boolean;
@@ -1382,6 +1454,7 @@ export function allAggressiveOptions(on: boolean): AggressiveOptions {
     eliminateDeadLocals: on,
     eliminateDeadStores: on,
     foldConstants: on,
+    reduceConstantVectors: on,
     compoundAssignments: on,
     mergeDeclarations: on,
     stripRedundantBraces: on,
@@ -1492,6 +1565,7 @@ export function golf(source: string, aggressive: boolean | AggressiveOptions = f
   if (options.eliminateDeadLocals) items = eliminateDeadLocals(items, aggressiveStats);
   if (options.eliminateDeadStores) items = eliminateDeadStores(items, aggressiveStats);
   if (options.foldConstants) items = foldConstants(items, aggressiveStats);
+  if (options.reduceConstantVectors) items = reduceConstantVectors(items, aggressiveStats);
   if (options.compoundAssignments) items = compoundAssignments(items, aggressiveStats);
   if (options.mergeDeclarations) items = mergeDeclarations(items, aggressiveStats);
   if (options.stripRedundantBraces) items = stripRedundantBraces(items, aggressiveStats);

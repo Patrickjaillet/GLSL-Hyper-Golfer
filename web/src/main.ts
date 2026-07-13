@@ -170,6 +170,7 @@ app.innerHTML = `
             <span><b id="c-dead">0</b> <span data-i18n="stat.deadLocals">locaux morts supprimés</span></span>
             <span><b id="c-stores">0</b> <span data-i18n="stat.deadStores">écritures mortes supprimées</span></span>
             <span><b id="c-folded">0</b> <span data-i18n="stat.folded">constantes repliées</span></span>
+            <span><b id="c-vectors">0</b> <span data-i18n="stat.constantVectors">vecteurs constants réduits</span></span>
             <span><b id="c-compound">0</b> <span data-i18n="stat.compound">affectations composées</span></span>
             <span><b id="c-merged">0</b> <span data-i18n="stat.merged">déclarations fusionnées</span></span>
             <span><b id="c-braces">0</b> <span data-i18n="stat.braces">blocs d'accolades supprimés</span></span>
@@ -221,6 +222,9 @@ app.innerHTML = `
       <label data-i18n-title="pass.foldConstants.title" title="">
         <input type="checkbox" id="pass-fold-constants" checked /><span data-i18n="pass.foldConstants.label">constantes</span>
       </label>
+      <label data-i18n-title="pass.constantVectors.title" title="">
+        <input type="checkbox" id="pass-constant-vectors" checked /><span data-i18n="pass.constantVectors.label">vecteurs constants</span>
+      </label>
       <label data-i18n-title="pass.compound.title" title="">
         <input type="checkbox" id="pass-compound" checked /><span data-i18n="pass.compound.label">affectations composées</span>
       </label>
@@ -265,6 +269,7 @@ const aggressiveStatsRow = document.getElementById("aggressive-stats")!;
 const cDead = document.getElementById("c-dead")!;
 const cStores = document.getElementById("c-stores")!;
 const cFolded = document.getElementById("c-folded")!;
+const cVectors = document.getElementById("c-vectors")!;
 const cCompound = document.getElementById("c-compound")!;
 const cBraces = document.getElementById("c-braces")!;
 const cMerged = document.getElementById("c-merged")!;
@@ -273,10 +278,11 @@ const aggressiveToggle = document.getElementById("aggressive-toggle") as HTMLInp
 const passDeadLocals = document.getElementById("pass-dead-locals") as HTMLInputElement;
 const passDeadStores = document.getElementById("pass-dead-stores") as HTMLInputElement;
 const passFoldConstants = document.getElementById("pass-fold-constants") as HTMLInputElement;
+const passConstantVectors = document.getElementById("pass-constant-vectors") as HTMLInputElement;
 const passCompound = document.getElementById("pass-compound") as HTMLInputElement;
 const passMerge = document.getElementById("pass-merge") as HTMLInputElement;
 const passBraces = document.getElementById("pass-braces") as HTMLInputElement;
-const passCheckboxes = [passDeadLocals, passDeadStores, passFoldConstants, passCompound, passMerge, passBraces];
+const passCheckboxes = [passDeadLocals, passDeadStores, passFoldConstants, passConstantVectors, passCompound, passMerge, passBraces];
 const passesBtn = document.getElementById("passes-btn") as HTMLButtonElement;
 const passesPopover = document.getElementById("passes-popover") as HTMLElement;
 const importBtn = document.getElementById("import-btn") as HTMLButtonElement;
@@ -741,6 +747,7 @@ function currentAggressiveOptions(): AggressiveOptions {
     eliminateDeadLocals: passDeadLocals.checked,
     eliminateDeadStores: passDeadStores.checked,
     foldConstants: passFoldConstants.checked,
+    reduceConstantVectors: passConstantVectors.checked,
     compoundAssignments: passCompound.checked,
     mergeDeclarations: passMerge.checked,
     stripRedundantBraces: passBraces.checked,
@@ -811,6 +818,7 @@ function golfProject(): void {
   cDead.textContent = String(sumAgg("deadLocalsRemoved"));
   cStores.textContent = String(sumAgg("deadStoresRemoved"));
   cFolded.textContent = String(sumAgg("constantsFolded"));
+  cVectors.textContent = String(sumAgg("constantVectorsReduced"));
   cCompound.textContent = String(sumAgg("compoundAssignments"));
   cMerged.textContent = String(sumAgg("declarationsMerged"));
   cBraces.textContent = String(sumAgg("bracesRemoved"));

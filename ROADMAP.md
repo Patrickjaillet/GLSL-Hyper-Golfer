@@ -51,7 +51,30 @@ classements), thèmes visuels, et optimisation mobile.
 - [ ] Réécriture `a?b:c` à partir de `if/else` quand plus court
 - [ ] Détection et fusion de `for`/`while` équivalents plus courts
 - [ ] Suppression de `return;` final implicite en fin de fonction `void`
-- [ ] Réduction des vecteurs constants (`vec3(1.,1.,1.)` → `vec3(1.)`)
+- ✅ **FAIT (13/07/2026) — Réduction des vecteurs constants**
+      (`vec3(1.,1.,1.)` → `vec3(1.)`), 7e passe agressive
+      (`aggressive.rs::reduce_constant_vectors`, miroir TS dans
+      `golfer.ts`). **Sûr par la spec GLSL elle-même, pas une
+      heuristique** : un constructeur de vecteur appelé avec un seul
+      argument scalaire diffuse cette valeur sur chaque composante,
+      donc `vecN(x)` et `vecN(x,x,...,x)` sont *par définition* la même
+      valeur — pas besoin d'évaluateur d'expressions, juste une
+      vérification d'égalité textuelle entre arguments. Restreint à
+      `vec2`/`vec3`/`vec4` (jamais `ivec`/`uvec`/`bvec`/matrices) avec
+      des arguments qui sont chacun un unique littéral numérique nu
+      (jamais une expression comme `1.+0.`, jamais un littéral négatif
+      — `-1.` se tokenise en `Punct('-')` puis `Number("1.")`, deux
+      tokens, pas un seul, donc hors du scope volontairement étroit de
+      cette passe). Tourne juste après `fold_constants` dans le
+      pipeline : une constante repliée devient immédiatement éligible
+      (`vec3(2*3,2*3,2*3)` → replié en `vec3(6,6,6)` → réduit en
+      `vec3(6)`, testé explicitement). 6 tests Rust dédiés (réduction
+      simple, refus sur valeurs différentes, refus sur argument non
+      littéral, refus sur trop d'arguments, vec2/vec4, synergie avec le
+      repliement de constantes) + `fixtures/constant_vectors.glsl` en
+      parité Rust/TS/wasm (30/30) + checkbox dédiée dans l'UI, vérifiée
+      en headless (réduit quand activée, laisse intact quand
+      désactivée, stat à jour, zéro erreur console).
 - [ ] Réutilisation d'un paramètre de fonction comme variable de travail
       (évite une déclaration locale)
 - [ ] Constant folding étendu aux flottants (pas seulement les entiers

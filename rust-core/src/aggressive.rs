@@ -27,6 +27,7 @@ pub struct AggressiveStats {
     pub constants_folded: usize,
     pub dead_locals_removed: usize,
     pub dead_stores_removed: usize,
+    pub constant_vectors_reduced: usize,
 }
 
 fn is_unary_prefix(c: char) -> bool {
@@ -446,6 +447,90 @@ pub fn fold_constants(items: Vec<Item>, stats: &mut AggressiveStats) -> Vec<Item
             }
         }
 
+        out.push(items[i].clone());
+        i += 1;
+    }
+    out
+}
+
+// ---------------------------------------------------------------------
+// Constant vector reduction — `vec3(1.,1.,1.)` -> `vec3(1.)`. Safe by
+// the GLSL spec itself, not a heuristic: a vector constructor called
+// with a single scalar argument broadcasts that value to every
+// component, which is *by definition* the same value the N-argument
+// form produces when all N arguments are identical. Restricted to
+// vec2/vec3/vec4 with plain numeric literal arguments (never ivec/
+// uvec/bvec, never an expression like `1.+0.` — only a bare `Number`
+// token) so this is a pure token-count-and-text-equality check, no
+// expression evaluation needed: every argument must be the exact same
+// token text, which the shortened-number pass upstream already made
+// canonical (two literals that mean the same value produce the same
+// text), so text equality is exactly the right check, not just an
+// approximation of it. Deliberately does not attempt negative literals
+// (`-1.` tokenizes as `Punct('-')` then `Number("1.")`, not a single
+// token) — narrower coverage, but avoids having to reason about unary
+// minus placement at all.
+fn vec_arity(name: &str) -> Option<usize> {
+    match name {
+        "vec2" => Some(2),
+        "vec3" => Some(3),
+        "vec4" => Some(4),
+        _ => None,
+    }
+}
+
+/// If `items[i..]` is `vecN(<lit>,<lit>,...,<lit>)` with exactly N
+/// identical numeric-literal arguments, returns the index of the
+/// closing `)` and the index of the (first) literal to keep.
+fn try_match_constant_vector(items: &[Item], i: usize) -> Option<(usize, usize)> {
+    let arity = vec_arity(find_ident(items, i)?)?;
+    if !matches!(items.get(i + 1).map(|it| &it.tok), Some(Tok::Punct('('))) {
+        return None;
+    }
+    let mut idx = i + 2;
+    let mut first_text: Option<&str> = None;
+    let mut first_idx = None;
+    for k in 0..arity {
+        match items.get(idx).map(|it| &it.tok) {
+            Some(Tok::Number(_)) => {}
+            _ => return None,
+        }
+        let text = items[idx].text.as_str();
+        match first_text {
+            Some(ft) if ft != text => return None,
+            Some(_) => {}
+            None => {
+                first_text = Some(text);
+                first_idx = Some(idx);
+            }
+        }
+        idx += 1;
+        if k + 1 < arity {
+            if !matches!(items.get(idx).map(|it| &it.tok), Some(Tok::Punct(','))) {
+                return None;
+            }
+            idx += 1;
+        }
+    }
+    if !matches!(items.get(idx).map(|it| &it.tok), Some(Tok::Punct(')'))) {
+        return None;
+    }
+    Some((idx, first_idx.unwrap()))
+}
+
+pub fn reduce_constant_vectors(items: Vec<Item>, stats: &mut AggressiveStats) -> Vec<Item> {
+    let mut out: Vec<Item> = Vec::with_capacity(items.len());
+    let mut i = 0;
+    while i < items.len() {
+        if let Some((close_idx, value_idx)) = try_match_constant_vector(&items, i) {
+            out.push(items[i].clone());
+            out.push(items[i + 1].clone());
+            out.push(items[value_idx].clone());
+            out.push(items[close_idx].clone());
+            stats.constant_vectors_reduced += 1;
+            i = close_idx + 1;
+            continue;
+        }
         out.push(items[i].clone());
         i += 1;
     }

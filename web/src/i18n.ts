@@ -24,7 +24,7 @@ const fr: Dict = {
   "panel.viewport.title": "Viewport temps réel",
   "toggle.aggressive.label": "Golf agressif",
   "toggle.aggressive.title":
-    "Coche/décoche les 6 passes ci-dessous d'un coup. Chacune reste réglable individuellement — voir ROADMAP.md pour ce que chaque passe fait et ne fait pas.",
+    "Coche/décoche les 7 passes ci-dessous d'un coup. Chacune reste réglable individuellement — voir ROADMAP.md pour ce que chaque passe fait et ne fait pas.",
   "btn.import.title": "Importer un projet multi-buffer depuis une URL Shadertoy (nécessite une clé API Shadertoy gratuite)",
   "btn.export.title": "Exporter le projet courant au format JSON Shadertoy",
   "btn.passes.title": "Choisir individuellement les passes actives",
@@ -49,6 +49,7 @@ const fr: Dict = {
   "stat.deadLocals": "locaux morts supprimés",
   "stat.deadStores": "écritures mortes supprimées",
   "stat.folded": "constantes repliées",
+  "stat.constantVectors": "vecteurs constants réduits",
   "stat.compound": "affectations composées",
   "stat.merged": "déclarations fusionnées",
   "stat.braces": "blocs d'accolades supprimés",
@@ -65,6 +66,9 @@ const fr: Dict = {
     "Supprime une écriture immédiatement écrasée par la suivante, sans lecture entre les deux (x=1.;x=2.; → x=2.;).",
   "pass.foldConstants.label": "constantes",
   "pass.foldConstants.title": "Replie les opérations *, / et % entre littéraux entiers purs (2*3 → 6).",
+  "pass.constantVectors.label": "vecteurs constants",
+  "pass.constantVectors.title":
+    "Réduit vec2/vec3/vec4(x,x,...,x) à vec2/vec3/vec4(x) quand tous les arguments sont le même littéral numérique (diffusion garantie par la spec GLSL).",
   "pass.compound.label": "affectations composées",
   "pass.compound.title": "Réécrit a=a+b en a+=b quand le membre droit est un terme unique.",
   "pass.merge.label": "fusion déclarations",
@@ -106,7 +110,7 @@ const en: Dict = {
   "panel.viewport.title": "Live viewport",
   "toggle.aggressive.label": "Aggressive golf",
   "toggle.aggressive.title":
-    "Checks/unchecks all 6 passes below at once. Each stays individually toggleable — see ROADMAP.md for exactly what each pass does and doesn't do.",
+    "Checks/unchecks all 7 passes below at once. Each stays individually toggleable — see ROADMAP.md for exactly what each pass does and doesn't do.",
   "btn.import.title": "Import a multi-buffer project from a Shadertoy URL (needs a free Shadertoy API key)",
   "btn.export.title": "Export the current project as Shadertoy JSON",
   "btn.passes.title": "Choose which passes are active individually",
@@ -131,6 +135,7 @@ const en: Dict = {
   "stat.deadLocals": "dead locals removed",
   "stat.deadStores": "dead stores removed",
   "stat.folded": "constants folded",
+  "stat.constantVectors": "constant vectors reduced",
   "stat.compound": "compound assignments",
   "stat.merged": "declarations merged",
   "stat.braces": "brace blocks removed",
@@ -147,6 +152,9 @@ const en: Dict = {
     "Removes a write immediately overwritten by the next one, with no read in between (x=1.;x=2.; → x=2.;).",
   "pass.foldConstants.label": "constants",
   "pass.foldConstants.title": "Folds *, / and % operations between plain integer literals (2*3 → 6).",
+  "pass.constantVectors.label": "constant vectors",
+  "pass.constantVectors.title":
+    "Reduces vec2/vec3/vec4(x,x,...,x) to vec2/vec3/vec4(x) when every argument is the same numeric literal (broadcast guaranteed by the GLSL spec).",
   "pass.compound.label": "compound assignments",
   "pass.compound.title": "Rewrites a=a+b as a+=b when the right-hand side is a single term.",
   "pass.merge.label": "merge declarations",
