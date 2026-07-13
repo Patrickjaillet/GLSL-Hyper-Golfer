@@ -1,0 +1,752 @@
+/* ---------------------------------------------------------------------
+   Design tokens
+   Subject: a precision instrument for shrinking shader source — the
+   visual language borrows from oscilloscopes and lab test benches:
+   two signal "traces" (amber = source, cyan = golfed output) racing
+   against each other, ticked meters instead of plain percentages.
+
+   Layout: a fixed-viewport "no scroll" dashboard (ROADMAP-UI.md) — the
+   page itself never scrolls (`html,body{overflow:hidden}`), only the
+   individual panels (source editor, golfed output) scroll internally.
+   Below a width/height breakpoint the 3-column layout collapses into a
+   single-panel tab view (`#tab-bar`) rather than trying to force 3
+   columns onto a screen too small to make them usable.
+--------------------------------------------------------------------- */
+:root {
+  --ink: #0a0d0b;
+  --ink-raised: #10140f;
+  --ink-line: #263026;
+  --ink-line-soft: #1a211a;
+  --paper: #d9e2d6;
+  --paper-dim: #8a988a;
+  --amber: #e8a33d;
+  --amber-dim: #8a6a35;
+  --cyan: #5fd4c8;
+  --cyan-dim: #3d7a72;
+  --danger: #e8615b;
+
+  --font-display: "Space Grotesk", "IBM Plex Sans", sans-serif;
+  --font-body: "IBM Plex Sans", sans-serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+
+  --radius: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--ink);
+  color: var(--paper);
+}
+
+body {
+  font-family: var(--font-body);
+  background-image: linear-gradient(var(--ink-line-soft) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ink-line-soft) 1px, transparent 1px);
+  background-size: 48px 48px;
+  background-position: -1px -1px;
+}
+
+body.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+::selection {
+  background: var(--amber);
+  color: var(--ink);
+}
+
+button,
+textarea,
+input {
+  font-family: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------------
+   Shell — the whole app pinned to the viewport, never scrolls itself.
+--------------------------------------------------------------------- */
+.shell {
+  height: 100dvh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 10px;
+  padding: 12px 14px;
+}
+
+.masthead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--ink-line);
+  padding-bottom: 10px;
+  min-height: 0;
+}
+
+.masthead .brand {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+
+.brand .mark {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--amber);
+  border-radius: var(--radius);
+  padding: 3px 7px;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
+.masthead h1 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 18px;
+  letter-spacing: -0.01em;
+  margin: 0;
+  color: #f2f5ef;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: default;
+}
+
+/* ---------------------------------------------------------------------
+   Tab bar — only shown under the narrow-viewport breakpoint, where the
+   3-column layout collapses to one panel at a time (see media query
+   near the bottom of this file).
+--------------------------------------------------------------------- */
+.tab-bar {
+  display: none;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.tab-btn {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--paper-dim);
+  background: transparent;
+  border: 1px solid var(--ink-line);
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.tab-btn:hover {
+  color: var(--paper);
+  border-color: var(--cyan-dim);
+}
+
+.tab-btn.active {
+  color: var(--ink);
+  background: var(--cyan);
+  border-color: var(--cyan);
+}
+
+.engine-pill {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--paper-dim);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: default;
+}
+
+.engine-pill b {
+  color: var(--cyan);
+  font-weight: 500;
+}
+
+/* ---------------------------------------------------------------------
+   Layout grid — 3 columns (source | golfé | viewport) with 2 draggable
+   resizer handles between them. The first two columns are user-resized
+   pixel widths (`--w1`/`--w2`, set via JS + persisted to localStorage);
+   the last column always takes whatever space remains (`1fr`) so it can
+   never be crushed to 0 by an overzealous drag.
+--------------------------------------------------------------------- */
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(240px, var(--w1, 1fr)) 10px minmax(240px, var(--w2, 1fr)) 10px minmax(280px, 1fr);
+  align-items: stretch;
+  min-height: 0;
+}
+
+.resizer {
+  cursor: col-resize;
+  position: relative;
+}
+
+.resizer::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 4px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--ink-line);
+  transition: background 0.15s ease;
+}
+
+.resizer:hover::after,
+.resizer:focus-visible::after {
+  background: var(--cyan);
+}
+
+.panel,
+.viewport-wrap {
+  background: var(--ink-raised);
+  border: 1px solid var(--ink-line);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  flex-shrink: 0;
+}
+
+.panel-title {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--paper-dim);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.panel-title .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.panel-title .dot.amber {
+  background: var(--amber);
+  box-shadow: 0 0 6px var(--amber);
+}
+.panel-title .dot.cyan {
+  background: var(--cyan);
+  box-shadow: 0 0 6px var(--cyan);
+}
+
+.pretty-toggle {
+  margin-left: auto;
+  margin-right: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  text-transform: none;
+  color: var(--paper-dim);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.pretty-toggle:hover {
+  color: var(--paper);
+}
+
+.pretty-toggle input {
+  accent-color: var(--cyan);
+  cursor: pointer;
+}
+
+/* ---------------------------------------------------------------------
+   Editor (source) — textarea + synced line-number gutter. Fills the
+   remaining height of `.panel` instead of a fixed px height, so it
+   grows/shrinks with whatever room the resizable columns give it;
+   scrolls internally (never the page) when the source is long.
+--------------------------------------------------------------------- */
+.editor {
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  flex: 1;
+  min-height: 0;
+  background: var(--ink);
+  border: 1px solid var(--ink-line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.gutter {
+  padding: 10px 0;
+  text-align: right;
+  color: #3a4a3a;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  user-select: none;
+  overflow: hidden;
+  border-right: 1px solid var(--ink-line);
+  background: #0c0f0b;
+}
+
+.gutter div {
+  padding-right: 8px;
+}
+
+textarea#source {
+  border: 0;
+  resize: none;
+  outline: none;
+  background: transparent;
+  color: var(--paper);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 10px 12px;
+  white-space: pre;
+  overflow: auto;
+}
+
+/* ---------------------------------------------------------------------
+   Output panel
+--------------------------------------------------------------------- */
+.output-code {
+  flex: 1;
+  min-height: 0;
+  background: var(--ink);
+  border: 1px solid var(--ink-line);
+  border-radius: var(--radius);
+  padding: 12px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--cyan);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.output-code .placeholder {
+  color: var(--paper-dim);
+  font-style: italic;
+}
+
+/* ---------------------------------------------------------------------
+   Actions
+--------------------------------------------------------------------- */
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+  flex-shrink: 0;
+}
+
+.aggressive-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--paper-dim);
+  cursor: pointer;
+  user-select: none;
+  margin-right: auto;
+  white-space: nowrap;
+}
+
+.aggressive-toggle:hover {
+  color: var(--paper);
+}
+
+.aggressive-toggle input {
+  accent-color: var(--cyan);
+  cursor: pointer;
+}
+
+/* ---------------------------------------------------------------------
+   Aggressive-passes popover — anchored to the "⚙ Passes" button via
+   `position: fixed` + JS-computed left/bottom (see main.ts), which lets
+   it escape `.panel`'s `overflow: hidden` instead of getting clipped by
+   it, and keeps opening it from ever pushing the rest of the panel's
+   layout around (unlike the old inline <details> block).
+--------------------------------------------------------------------- */
+button.btn.small {
+  font-size: 10.5px;
+  padding: 8px 10px;
+}
+
+.passes-popover {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 210px;
+  background: var(--ink-raised);
+  border: 1px solid var(--ink-line);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--paper-dim);
+}
+
+.passes-popover[hidden] {
+  display: none;
+}
+
+.passes-popover label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 2px;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.passes-popover label:hover {
+  color: var(--paper);
+}
+
+.passes-popover input {
+  accent-color: var(--cyan);
+  cursor: pointer;
+}
+
+button.btn {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  border-radius: var(--radius);
+  padding: 9px 16px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: transform 0.08s ease, background 0.15s ease, border-color 0.15s ease;
+  white-space: nowrap;
+}
+
+button.btn:active {
+  transform: translateY(1px);
+}
+
+button.btn.primary {
+  background: var(--amber);
+  color: #1a1204;
+  border-color: var(--amber);
+}
+button.btn.primary:hover {
+  background: #f0b357;
+}
+
+button.btn.ghost {
+  background: transparent;
+  color: var(--paper-dim);
+  border-color: var(--ink-line);
+}
+button.btn.ghost:hover {
+  color: var(--paper);
+  border-color: var(--cyan-dim);
+}
+
+button.btn.copy {
+  background: transparent;
+  color: var(--cyan);
+  border-color: var(--cyan-dim);
+  padding: 6px 12px;
+  font-size: 10.5px;
+}
+button.btn.copy:hover {
+  border-color: var(--cyan);
+}
+
+/* ---------------------------------------------------------------------
+   Signal meter (signature element)
+   A tick-bar readout of the compression ratio, styled like an
+   oscilloscope/VU meter rather than a plain percentage line.
+--------------------------------------------------------------------- */
+.meter-block {
+  margin-top: 10px;
+  border: 1px solid var(--ink-line);
+  border-radius: var(--radius);
+  padding: 9px 12px;
+  background: #0c0f0b;
+  flex-shrink: 0;
+}
+
+.meter-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.meter-label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--paper-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  width: 92px;
+  flex-shrink: 0;
+}
+
+.meter-ticks {
+  display: flex;
+  gap: 3px;
+  flex: 1;
+}
+
+.meter-ticks .tick {
+  height: 14px;
+  flex: 1;
+  background: var(--ink-line);
+  border-radius: 1px;
+  transition: background 0.25s ease, box-shadow 0.25s ease;
+}
+
+.meter-ticks .tick.lit {
+  background: var(--amber);
+  box-shadow: 0 0 5px rgba(232, 163, 61, 0.6);
+}
+
+.meter-value {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--amber);
+  width: 58px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.stat-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--paper-dim);
+}
+
+.stat-strip b {
+  color: var(--paper);
+  font-weight: 500;
+}
+
+/* ---------------------------------------------------------------------
+   Viewport
+--------------------------------------------------------------------- */
+.panel-title .compare-toggle {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  text-transform: none;
+  color: var(--paper-dim);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.panel-title .compare-toggle:hover {
+  color: var(--paper);
+}
+
+.panel-title .compare-toggle input {
+  accent-color: var(--cyan);
+  cursor: pointer;
+}
+
+.viewport-split {
+  display: flex;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+}
+
+.viewport-frame {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--ink-line);
+  border-radius: var(--radius);
+  background: #000;
+  overflow: hidden;
+}
+
+.viewport-frame[hidden] {
+  display: none;
+}
+
+.viewport-label {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 1;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--paper-dim);
+  background: rgba(10, 13, 11, 0.6);
+  padding: 4px 8px;
+  border-radius: var(--radius);
+  border: 1px solid var(--ink-line);
+  pointer-events: none;
+}
+
+canvas#glcanvas,
+canvas#glcanvas-source {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #000;
+}
+
+.viewport-hud {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  display: flex;
+  gap: 14px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--paper-dim);
+  background: rgba(10, 13, 11, 0.6);
+  padding: 4px 8px;
+  border-radius: var(--radius);
+  border: 1px solid var(--ink-line);
+  pointer-events: none;
+}
+
+.viewport-hud .fps b {
+  color: var(--cyan);
+}
+
+.viewport-controls {
+  position: absolute;
+  bottom: 10px;
+  right: 12px;
+  display: flex;
+  gap: 8px;
+}
+
+.icon-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius);
+  border: 1px solid var(--ink-line);
+  background: rgba(10, 13, 11, 0.75);
+  color: var(--paper);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+}
+.icon-btn:hover {
+  border-color: var(--cyan-dim);
+  color: var(--cyan);
+}
+
+.error-banner {
+  display: none;
+  margin-top: 8px;
+  border: 1px solid var(--danger);
+  background: rgba(232, 97, 91, 0.08);
+  color: #ffb3ae;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.55;
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  white-space: pre-wrap;
+  overflow: auto;
+  flex-shrink: 1;
+  min-height: 0;
+}
+.error-banner.visible {
+  display: block;
+}
+
+/* ---------------------------------------------------------------------
+   Narrow-viewport fallback — guaranteeing a true zero-scroll 3-column
+   layout on any width/height (a phone in portrait, a non-maximized
+   laptop window) isn't realistic once a code editor is one of the
+   panels, so below this breakpoint the layout switches to one panel at
+   a time via `#tab-bar` instead — still zero page scroll, just a
+   single view instead of three side by side.
+--------------------------------------------------------------------- */
+@media (max-width: 1400px), (max-height: 760px) {
+  .tab-bar {
+    display: flex;
+  }
+
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .resizer {
+    display: none;
+  }
+
+  .panel,
+  .viewport-wrap {
+    display: none;
+  }
+
+  .panel.active-tab,
+  .viewport-wrap.active-tab {
+    display: flex;
+  }
+}

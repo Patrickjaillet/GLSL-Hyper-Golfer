@@ -1,0 +1,31 @@
+[package]
+name = "glsl_golf_core"
+version = "0.1.0"
+edition = "2021"
+description = "Real tokenizer-based GLSL minifier / hyper-golfing engine"
+license = "MIT"
+
+[lib]
+name = "glsl_golf_core"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "golf"
+path = "src/bin/golf.rs"
+
+[dependencies]
+# Only pulled in when compiling for the browser (wasm32-unknown-unknown).
+# Build with:  wasm-pack build --target web --release --features wasm
+wasm-bindgen = { version = "0.2", optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+default = []
+wasm = ["wasm-bindgen"]
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"

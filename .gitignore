@@ -1,0 +1,15 @@
+# Rust
+/rust-core/target/
+/rust-core/pkg/
+
+# Node / web app
+/web/node_modules/
+/web/dist/
+/web/tsconfig.tsbuildinfo
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+.DS_Store
