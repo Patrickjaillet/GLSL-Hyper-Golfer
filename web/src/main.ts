@@ -259,6 +259,8 @@ function applyTranslations(): void {
   renderOutput();
   updateLegacyWarnings();
   renderSizeBadges(lastTotalOutBytes);
+  sourceEditor.contentDOM.setAttribute("aria-label", t("editor.source.ariaLabel"));
+  outputEditor.contentDOM.setAttribute("aria-label", t("editor.output.ariaLabel"));
 }
 
 const bufferTabsEl = document.getElementById("buffer-tabs")!;
@@ -424,10 +426,15 @@ function prettyPrintGolfed(code: string): string {
 // ---------------------------------------------------------------------
 const sourceEditorMount = document.getElementById("source-editor-mount")!;
 const outputEditorMount = document.getElementById("output-editor-mount")!;
-const sourceEditor: EditorView = createSourceEditor(sourceEditorMount, getPassState(currentTab).code, (doc) => {
-  setCurrentCode(doc);
-});
-const outputEditor: EditorView = createReadOnlyEditor(outputEditorMount, t("output.placeholder"));
+const sourceEditor: EditorView = createSourceEditor(
+  sourceEditorMount,
+  getPassState(currentTab).code,
+  (doc) => {
+    setCurrentCode(doc);
+  },
+  t("editor.source.ariaLabel"),
+);
+const outputEditor: EditorView = createReadOnlyEditor(outputEditorMount, t("output.placeholder"), t("editor.output.ariaLabel"));
 
 // ---------------------------------------------------------------------
 // Buffer tabs (Common / Buffer A-D / Image) + per-pass channel wiring.

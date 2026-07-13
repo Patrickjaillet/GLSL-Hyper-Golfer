@@ -41,6 +41,32 @@ jobs:
       - name: Build
         working-directory: web
         run: npm run build
+      - name: Bundle size budget
+        working-directory: web
+        run: |
+          # Budgets set with real headroom over the size at the time this
+          # check was added (JS ~146.6 KiB gzipped, wasm ~54.2 KiB
+          # gzipped) rather than the current size exactly, so ordinary
+          # growth (a new pass, a new UI feature) doesn't trip this on
+          # its own -- it's meant to catch a real regression (e.g.
+          # accidentally bundling a heavy dependency), not to enforce
+          # today's size forever.
+          js_size=$(cat dist/assets/index-*.js | gzip -c | wc -c)
+          wasm_size=$(cat dist/assets/*.wasm | gzip -c | wc -c)
+          echo "JS bundle (gzipped): ${js_size} bytes"
+          echo "wasm bundle (gzipped): ${wasm_size} bytes"
+          js_budget=204800   # 200 KiB
+          wasm_budget=81920  # 80 KiB
+          fail=0
+          if [ "$js_size" -gt "$js_budget" ]; then
+            echo "::error::JS bundle exceeds budget (${js_size} > ${js_budget} bytes gzipped)"
+            fail=1
+          fi
+          if [ "$wasm_size" -gt "$wasm_budget" ]; then
+            echo "::error::wasm bundle exceeds budget (${wasm_size} > ${wasm_budget} bytes gzipped)"
+            fail=1
+          fi
+          exit $fail
 
   parity:
     runs-on: ubuntu-latest

@@ -43,8 +43,12 @@ const theme = EditorView.theme(
       backgroundColor: "rgba(232,163,61,0.25)",
     },
     ".cm-gutters": {
+      // Was #3a4a3a — measured at a 2.03:1 contrast ratio against this
+      // background by an axe-core audit (WCAG AA requires 4.5:1 for
+      // normal text). var(--paper-dim) is the same secondary-text tone
+      // used everywhere else in the app and comfortably clears it.
       backgroundColor: "#0c0f0b",
-      color: "#3a4a3a",
+      color: "var(--paper-dim)",
       border: "none",
       borderRight: "1px solid var(--ink-line)",
     },
@@ -139,8 +143,29 @@ function baseExtensions(): Extension[] {
   ];
 }
 
+/**
+ * An axe-core audit flagged CodeMirror's content `<div>` as an ARIA
+ * input field with no accessible name, and its scrollable container as
+ * not reliably keyboard-focusable. Both editors go through this so
+ * neither is easy to forget it on: `aria-label` names the field for
+ * screen readers, and an explicit `tabIndex` guarantees the scroll
+ * container has focusable content regardless of contenteditable state
+ * (the read-only editor sets `contenteditable="false"`, which some
+ * accessibility tooling doesn't treat as focusable by itself).
+ */
+function labelForA11y(view: EditorView, label: string): EditorView {
+  view.contentDOM.setAttribute("aria-label", label);
+  view.contentDOM.tabIndex = 0;
+  return view;
+}
+
 /** Editable GLSL editor. `onChange` fires with the full document text on every edit. */
-export function createSourceEditor(parent: HTMLElement, initialDoc: string, onChange: (doc: string) => void): EditorView {
+export function createSourceEditor(
+  parent: HTMLElement,
+  initialDoc: string,
+  onChange: (doc: string) => void,
+  ariaLabel: string,
+): EditorView {
   const state = EditorState.create({
     doc: initialDoc,
     extensions: [
@@ -150,16 +175,16 @@ export function createSourceEditor(parent: HTMLElement, initialDoc: string, onCh
       }),
     ],
   });
-  return new EditorView({ state, parent });
+  return labelForA11y(new EditorView({ state, parent }), ariaLabel);
 }
 
 /** Read-only GLSL viewer, for the golfed-output panel. */
-export function createReadOnlyEditor(parent: HTMLElement, initialDoc: string): EditorView {
+export function createReadOnlyEditor(parent: HTMLElement, initialDoc: string, ariaLabel: string): EditorView {
   const state = EditorState.create({
     doc: initialDoc,
     extensions: [...baseExtensions(), EditorState.readOnly.of(true), EditorView.editable.of(false)],
   });
-  return new EditorView({ state, parent });
+  return labelForA11y(new EditorView({ state, parent }), ariaLabel);
 }
 
 /** Replaces the full document content, e.g. when switching buffer tabs or re-running the golfer. */

@@ -485,9 +485,17 @@ Shadertoy a besoin de :
         (`cargo clippy --fix` pour la majorité, suppression manuelle de
         la fonction morte), retesté (`cargo test` + parité) pour
         confirmer un comportement inchangé avant de commiter.
-  - [ ] audit de bundle size (le WASM + JS doivent rester légers) —
-        d'autant plus pertinent maintenant : CodeMirror (section 3) a
-        fait passer le JS gzippé d'environ 55 Ko à ~146 Ko
+  - ✅ **FAIT (14/07/2026) — Budget de taille de bundle en CI**, étape
+        ajoutée après le build dans le job `web-build` : mesure la
+        taille gzippée réelle (`gzip -c | wc -c`, pas l'estimation
+        affichée par Vite) du JS et du wasm, échoue si l'un dépasse son
+        budget. Budgets fixés avec une vraie marge au-dessus de la
+        taille au moment de l'ajout (JS ~146,6 Ko gzippé → budget 200
+        Ko ; wasm ~54,2 Ko gzippé → budget 80 Ko) plutôt que la taille
+        actuelle exacte, pour attraper une vraie régression (une
+        dépendance lourde ajoutée par erreur) sans faire échouer la CI
+        à chaque petite croissance normale (nouvelle passe, nouvelle
+        fonctionnalité UI).
   - [ ] `node scripts/wasm-check.mjs` en CI — délibérément pas ajouté
         cette fois : nécessiterait d'installer la cible
         `wasm32-unknown-unknown` + `wasm-pack` dans le job, un coût de
@@ -504,22 +512,37 @@ Shadertoy a besoin de :
 - ✅ **FAIT (13/07/2026) — i18n fr/en** — voir section 3 pour le détail
       complet (`web/src/i18n.ts`), fait dans le cadre de la killer
       feature 3 de la section 9.
-- 🟡 **PARTIEL (13/07/2026) — Accessibilité.** Pas un audit complet
-      (demanderait un vrai outil comme axe-core/Lighthouse, non lancé
-      cette session), mais plusieurs correctifs concrets faits en
-      passant : `aria-live="polite"` sur les bandes de statistiques
-      (annonce les changements de taux de réduction aux lecteurs
-      d'écran sans avoir à les surveiller activement), `aria-live=
-      "assertive"` sur le bandeau d'erreur, `aria-label` sur les
-      boutons/contrôles qui n'avaient qu'un symbole (⏸/✕) sans texte
-      accessible, et le bouton de suppression de buffer (un `<span
-      role="button">`, pas un vrai `<button>`, pour des raisons de
-      layout) a reçu un gestionnaire clavier Entrée/Espace explicite —
-      un rôle ARIA sans le comportement clavier qui va avec est pire
-      que pas de rôle du tout. **Non fait** : audit de contraste
-      colorimétrique formel (WCAG AA/AAA) de la palette existante,
-      test avec un vrai lecteur d'écran (NVDA/VoiceOver) plutôt que
-      des vérifications d'attributs.
+- ✅ **FAIT (14/07/2026) — Audit accessibilité avec un vrai outil
+      (`@axe-core/playwright`), pas seulement des correctifs ad hoc.**
+      Complète les correctifs manuels de la veille (`aria-live` sur les
+      stats/le bandeau d'erreur, `aria-label` sur les contrôles à
+      icône seule, gestion clavier du bouton de suppression de buffer)
+      par un vrai audit WCAG 2.0/2.1 A+AA sur l'app construite, dans 4
+      états (défaut, popover de passes ouvert, mode onglets étroit sur
+      l'onglet Source, mode onglets étroit sur l'onglet Viewport).
+      **3 violations réelles trouvées et corrigées** :
+  - `aria-input-field-name` — les `<div>` de contenu de CodeMirror
+    (éditeur Source et panneau Golfé) n'avaient aucun nom accessible.
+    `editor.ts::createSourceEditor`/`createReadOnlyEditor` prennent
+    maintenant un paramètre `ariaLabel`, posé sur `view.contentDOM` et
+    retraduit au changement de langue.
+  - `color-contrast` — le texte de la gouttière de numéros de ligne
+    (`#3a4a3a` sur fond `#0c0f0b`) mesurait un ratio de 2.03:1, bien
+    sous le 4.5:1 minimum WCAG AA pour du texte normal. Remplacé par
+    `var(--paper-dim)`, déjà utilisé partout ailleurs dans l'app comme
+    couleur de texte secondaire.
+  - `scrollable-region-focusable` — le conteneur défilant de
+    CodeMirror (`.cm-scroller`) n'était pas garanti accessible au
+    clavier, en particulier pour le panneau Golfé en lecture seule
+    (`contenteditable="false"`, que certains outils ne comptent pas
+    comme focusable par défaut). `contentDOM.tabIndex = 0` posé
+    explicitement dans les deux éditeurs.
+
+      **0 violation restante** dans les 4 états testés après correctifs
+      (23 règles passées, contre 21 avant). **Non fait** : test avec un
+      vrai lecteur d'écran (NVDA/VoiceOver) — un outil automatisé comme
+      axe-core détecte les défauts structurels/ARIA mais ne remplace
+      pas un test d'usage réel.
 
 ---
 
