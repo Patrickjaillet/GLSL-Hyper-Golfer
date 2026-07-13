@@ -166,6 +166,7 @@ app.innerHTML = `
             <span><b id="c-renamed">0</b> <span data-i18n="stat.renamed">identifiants renommés</span></span>
             <span><b id="c-numbers">0</b> <span data-i18n="stat.numbers">nombres raccourcis</span></span>
           </div>
+          <div class="size-badges" id="size-badges" aria-live="polite"></div>
           <div class="stat-strip" id="aggressive-stats" hidden aria-live="polite">
             <span><b id="c-dead">0</b> <span data-i18n="stat.deadLocals">locaux morts supprimés</span></span>
             <span><b id="c-stores">0</b> <span data-i18n="stat.deadStores">écritures mortes supprimées</span></span>
@@ -257,6 +258,7 @@ function applyTranslations(): void {
   renderChannelRow();
   renderOutput();
   updateLegacyWarnings();
+  renderSizeBadges(lastTotalOutBytes);
 }
 
 const bufferTabsEl = document.getElementById("buffer-tabs")!;
@@ -267,6 +269,7 @@ const ratioValue = document.getElementById("ratio-value")!;
 const cIn = document.getElementById("c-in")!;
 const cOut = document.getElementById("c-out")!;
 const cOutBytes = document.getElementById("c-out-bytes")!;
+const sizeBadges = document.getElementById("size-badges")!;
 const cRenamed = document.getElementById("c-renamed")!;
 const cNumbers = document.getElementById("c-numbers")!;
 const aggressiveStatsRow = document.getElementById("aggressive-stats")!;
@@ -828,6 +831,34 @@ function renderOutput(): void {
   setEditorContent(outputEditor, prettyToggle.checked ? prettyPrintGolfed(result.code) : result.code);
 }
 
+// ---------------------------------------------------------------------
+// Competition size-class badges — a handful of well-known GLSL golf/
+// demoscene byte budgets (Twitter shaders, 1k/4k/8k intros), each shown
+// with a checkmark once the golfed output actually fits under it.
+// Compares against the same UTF-8 byte count as the "octets golfés"
+// stat, summed across every active buffer/pass.
+// ---------------------------------------------------------------------
+const SIZE_CLASSES: { bytes: number; label: string }[] = [
+  { bytes: 280, label: "280B" },
+  { bytes: 512, label: "512B" },
+  { bytes: 1024, label: "1k" },
+  { bytes: 4096, label: "4k" },
+  { bytes: 8192, label: "8k" },
+];
+
+let lastTotalOutBytes = 0;
+
+function renderSizeBadges(totalBytes: number): void {
+  lastTotalOutBytes = totalBytes;
+  sizeBadges.innerHTML = SIZE_CLASSES.map((cls) => {
+    const fits = totalBytes <= cls.bytes;
+    const title = fits
+      ? t("sizeBadge.fits", { label: cls.label, limit: String(cls.bytes) })
+      : t("sizeBadge.tooBig", { label: cls.label, limit: String(cls.bytes), over: String(totalBytes - cls.bytes) });
+    return `<span class="size-badge${fits ? " fits" : ""}" title="${title}">${fits ? "✓" : "✗"} ${cls.label}</span>`;
+  }).join("");
+}
+
 /** Recomputed on every golf run *and* on language switch (so an already-visible warning re-translates instead of staying stale). */
 function updateLegacyWarnings(): void {
   const legacyWarnings = compilablePasses()
@@ -860,6 +891,7 @@ function golfProject(): void {
   cOutBytes.textContent = String(totalOutBytes);
   cRenamed.textContent = String(totalRenamed);
   cNumbers.textContent = String(totalNumbers);
+  renderSizeBadges(totalOutBytes);
 
   aggressiveStatsRow.hidden = !Object.values(options).some(Boolean);
   const sumAgg = (key: keyof GolfResult["stats"]["aggressive"]) =>

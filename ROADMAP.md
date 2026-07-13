@@ -362,8 +362,17 @@ Shadertoy a besoin de :
       golf lui-même ne golfe qu'en ASCII donc les deux nombres
       coïncident presque toujours en pratique — utile surtout comme
       garde-fou visible si jamais ils divergent).
-- [ ] Compteur spécifique pour les formats de concours connus (tweet
-      280, démo 4k/8k/64k, JS1k-style, etc.) avec badge "tient dans X"
+- ✅ **FAIT (14/07/2026) — Badges de formats de concours connus**
+      (280/512/1024/4096/8192 octets), sous la bande de stats du
+      panneau Golfé. ✓/✗ par seuil selon la taille UTF-8 déjà calculée
+      pour la stat "octets golfés", tooltip donnant la marge exacte
+      (dépassement en octets si ça ne rentre pas). Pas de 64k ni de
+      style JS1k spécifiquement — la liste retenue couvre les cas
+      réellement fréquents en golfing GLSL (shaders "tweet", 1k/4k/8k)
+      plutôt que la liste exhaustive suggérée à l'origine. Se
+      retraduit sans recalcul au changement de langue (même état
+      mémorisé que pour le bandeau d'avertissement ES 1.00),
+      vérifié en headless.
 
 ---
 

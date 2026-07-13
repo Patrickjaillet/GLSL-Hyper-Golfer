@@ -653,6 +653,29 @@ button.btn.copy:hover {
   font-weight: 500;
 }
 
+.size-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.size-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  padding: 2px 6px;
+  border-radius: var(--radius);
+  border: 1px solid var(--ink-line);
+  color: var(--paper-dim);
+  cursor: default;
+}
+
+.size-badge.fits {
+  color: var(--cyan);
+  border-color: var(--cyan-dim);
+}
+
 /* ---------------------------------------------------------------------
    Viewport
 --------------------------------------------------------------------- */
