@@ -461,7 +461,41 @@ Shadertoy a besoin de :
       "ça marche en local" n'est pas une preuve suffisante — même leçon
       que le bug swizzle-après-point plus haut, cette fois côté outillage
       plutôt que moteur.
-  - [ ] tests e2e (Playwright) du parcours golf → viewport → copier
+  - ✅ **FAIT (14/07/2026) — tests e2e (Playwright) du parcours golf →
+        viewport → copier.** Nouveau `web/e2e-test.mjs` : sert un vrai
+        build de production (`web/dist`, pas le dev server) via un
+        petit serveur HTTP local, puis pilote une page Chromium headless
+        dessus. Vérifie : le shader par défaut compile sans bannière
+        d'erreur, le moteur wasm est actif (pas le fallback TS), activer
+        "Golf agressif" sur le shader par défaut ne casse rien, la sortie
+        golfée est non vide, le compteur FPS montre une valeur positive
+        (preuve que le viewport rend vraiment des frames, pas juste
+        "pas d'erreur de compilation"), le clic sur "copier" ne lève
+        pas d'exception, et aucune erreur console. Nouveau job `e2e`
+        dans `ci.yml` (installe Chromium via
+        `npx playwright install --with-deps chromium`, build, puis
+        `npm run e2e`).
+
+        Deux décisions techniques notables :
+        - Le script vit dans `web/e2e-test.mjs` et non dans le
+          `scripts/` à la racine (comme `parity-test.mjs`) : la
+          résolution des specifiers nus ESM de Node (`import {
+          chromium } from "playwright"`) part du fichier important
+          lui-même, pas du `cwd` du process — `scripts/` est un
+          sibling de `web/`, pas un ancêtre, donc ne pourrait jamais
+          atteindre `web/node_modules/playwright`.
+        - Tous les clics passent par `element.click()` exécuté via
+          `page.evaluate()`, jamais par `page.click()` de Playwright.
+          Cette session a découvert que la boucle `requestAnimationFrame`
+          continue du viewport WebGL, combinée au rendu logiciel (pas
+          de vrai GPU dans ce bac à sable ni sur les runners CI), peut
+          affamer les vérifications d'actionability/stability du CDP
+          de Playwright au point de faire *hang* jusqu'au timeout, même
+          pour des boutons sans rapport avec le viewport. Piloter les
+          clics depuis l'intérieur de la page contourne entièrement
+          cette interaction CDP.
+
+        Vérifié en local (7/7 checks) contre un vrai `npm run build`.
   - [ ] tests de non-régression visuelle (screenshot diff du viewport)
   - ✅ **FAIT (14/07/2026) — `eslint` (config plate `eslint.config.js`,
         `typescript-eslint` en mode recommended)**, `npm run lint` câblé
