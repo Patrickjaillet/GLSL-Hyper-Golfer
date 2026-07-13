@@ -10,7 +10,7 @@ import {
   type ChannelWiring,
 } from "./renderer";
 import { initWasmGolfer, wasmGolf } from "./wasmGolfer";
-import { createSourceEditor, createReadOnlyEditor, setEditorContent } from "./editor";
+import { createSourceEditor, createReadOnlyEditor, setEditorContent, setErrorLineHighlight } from "./editor";
 import { t, getLocale, setLocale, onLocaleChange } from "./i18n";
 import type { EditorView } from "@codemirror/view";
 
@@ -530,15 +530,48 @@ let mpSourceRunner: MultiPassRunner | null = null;
 let legacySourceRunner: ShaderRunner | null = null;
 const compatMode = { active: false };
 
+/**
+ * Maps a driver's `ERROR: 0:N: ...` line number (which counts from the
+ * top of the *wrapped* source, uniform header included) back to a line
+ * within whichever editor is showing the code that actually failed —
+ * using `bodyStartLine`, computed in `renderer.ts` from the exact
+ * header text used for that compile, so this never hardcodes a header
+ * line count that could silently drift out of sync.
+ */
+function computeErrorLine(err: RenderError | MultiPassError): number | null {
+  const match = err.log.match(/ERROR:\s*\d+:(\d+):/);
+  if (!match || !err.bodyStartLine) return null;
+  const line = Number(match[1]) - err.bodyStartLine + 1;
+  return line >= 1 ? line : null;
+}
+
+/** How many lines `common + "\n"` occupies at the front of every pass's compiled source — needed to translate a wrapped-body line back to a line within *just* the pass's own code (which is all the source editor ever shows; it never displays Common inline). */
+function commonPrefixLineCount(): number {
+  return (common + "\n").split("\n").length - 1;
+}
+
 function reportError(err: RenderError | MultiPassError | null): void {
   if (!err) {
     errorBanner.classList.remove("visible");
     errorBanner.textContent = "";
+    setErrorLineHighlight(outputEditor, null);
     return;
   }
   errorBanner.classList.add("visible");
   const passLabel = "passId" in err ? `${BUFFER_LABELS[err.passId as BufferId]} / ${err.stage}` : err.stage;
   errorBanner.textContent = t("error.compileError", { pass: passLabel, log: err.log });
+
+  // This error is about the *golfed* code (the only thing `onError`
+  // ever fires for) — switch to whichever tab actually failed so the
+  // highlight lands somewhere visible, then highlight it. Almost always
+  // line 1 in practice since golfed code is normally a single line;
+  // still correct, and genuinely useful once "Version justifiée" is
+  // off (the state the highlighted line number is actually valid for —
+  // the compiled source was the raw minified string, not the
+  // client-side reformatted view).
+  const failingTab: BufferId = "passId" in err ? (err.passId as BufferId) : "image";
+  if (failingTab !== currentTab) switchTab(failingTab);
+  setErrorLineHighlight(outputEditor, computeErrorLine(err));
 }
 
 try {
@@ -861,10 +894,21 @@ function golfProject(): void {
     golfedOk = mpRunner?.load(golfedPassSources) ?? true;
   }
 
+  setErrorLineHighlight(sourceEditor, null);
   if (!golfedOk && !compatMode.active && mpRunner) {
     const sourceErr = mpRunner.tryCompile(rawPassSources);
     const note = sourceErr ? t("error.sourceAlsoBroken") : t("error.golfBrokeIt");
     errorBanner.textContent = (errorBanner.textContent ?? "") + note;
+    // Unlike the golfed-output highlight above, source is genuinely
+    // multi-line user-authored code — this is where a line number is
+    // actually informative rather than "line 1" almost every time.
+    if (sourceErr) {
+      const failingTab: BufferId = "passId" in sourceErr ? (sourceErr.passId as BufferId) : "image";
+      if (failingTab !== currentTab) switchTab(failingTab);
+      const wrappedLine = computeErrorLine(sourceErr);
+      const sourceLine = wrappedLine !== null ? wrappedLine - commonPrefixLineCount() : null;
+      setErrorLineHighlight(sourceEditor, sourceLine !== null && sourceLine >= 1 ? sourceLine : null);
+    }
   }
 
   if (compatMode.active) legacySourceRunner?.load(common + "\n" + imageState.code);

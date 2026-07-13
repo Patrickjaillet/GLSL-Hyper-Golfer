@@ -35,6 +35,9 @@ jobs:
       - name: Type-check
         working-directory: web
         run: npx tsc -b
+      - name: Lint
+        working-directory: web
+        run: npm run lint
       - name: Build
         working-directory: web
         run: npm run build

@@ -5,7 +5,7 @@
  * built-in gutter/folding, bracket matching, search, and basic
  * word-list autocompletion (see `glslLanguage.ts`).
  */
-import { EditorState, type Extension } from "@codemirror/state";
+import { EditorState, StateEffect, StateField, type Extension } from "@codemirror/state";
 import {
   EditorView,
   keymap,
@@ -15,6 +15,8 @@ import {
   drawSelection,
   dropCursor,
   rectangularSelection,
+  Decoration,
+  type DecorationSet,
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { bracketMatching, foldGutter, foldKeymap, indentOnInput, syntaxHighlighting, HighlightStyle } from "@codemirror/language";
@@ -62,6 +64,7 @@ const theme = EditorView.theme(
     },
     ".cm-scroller": { overflow: "auto", fontFamily: "var(--font-mono)" },
     "&.cm-editor.cm-focused": { outline: "none" },
+    ".cm-error-line": { backgroundColor: "rgba(232, 97, 91, 0.18)" },
   },
   { dark: true },
 );
@@ -80,6 +83,40 @@ const highlightStyle = HighlightStyle.define([
   { tag: t.definition(t.variableName), color: "var(--paper)", fontWeight: "600" },
 ]);
 
+// ---------------------------------------------------------------------
+// Compile-error line highlight — set via `setErrorLineHighlight()` when
+// a WebGL driver reports `ERROR: 0:N: ...` for code shown in this
+// editor (see `renderer.ts`'s `bodyStartLine` and its use in main.ts),
+// cleared on the next successful compile or edit.
+// ---------------------------------------------------------------------
+const setErrorLine = StateEffect.define<number | null>();
+
+const errorLineField = StateField.define<DecorationSet>({
+  create() {
+    return Decoration.none;
+  },
+  update(deco, tr) {
+    deco = deco.map(tr.changes);
+    for (const e of tr.effects) {
+      if (e.is(setErrorLine)) {
+        if (e.value === null || e.value < 1 || e.value > tr.state.doc.lines) {
+          deco = Decoration.none;
+        } else {
+          const line = tr.state.doc.line(e.value);
+          deco = Decoration.set([Decoration.line({ attributes: { class: "cm-error-line" } }).range(line.from)]);
+        }
+      }
+    }
+    return deco;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
+
+/** Highlights `line1Indexed` (or clears the highlight if `null`/out of range). No-op extension needs to already be present — see `baseExtensions`. */
+export function setErrorLineHighlight(view: EditorView, line1Indexed: number | null): void {
+  view.dispatch({ effects: setErrorLine.of(line1Indexed) });
+}
+
 function baseExtensions(): Extension[] {
   return [
     lineNumbers(),
@@ -97,6 +134,7 @@ function baseExtensions(): Extension[] {
     glsl(),
     syntaxHighlighting(highlightStyle),
     theme,
+    errorLineField,
     keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...foldKeymap, indentWithTab]),
   ];
 }

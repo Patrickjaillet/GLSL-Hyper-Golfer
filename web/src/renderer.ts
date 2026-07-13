@@ -20,6 +20,15 @@ void main() {
 export interface RenderError {
   stage: "vertex" | "fragment" | "link";
   log: string;
+  /**
+   * 1-indexed line, within the *wrapped* fragment source, where the
+   * caller's own `fragmentBody` begins — lets a consumer translate a
+   * driver's `ERROR: 0:N: ...` line number (which counts from the top
+   * of the wrapped source, header included) back to a line within the
+   * code the user actually sees in an editor. Only set for fragment
+   * compile errors; link errors don't reliably reference a single line.
+   */
+  bodyStartLine?: number;
 }
 
 export class ShaderRunner {
@@ -77,7 +86,7 @@ export class ShaderRunner {
     });
   }
 
-  private compile(source: string, type: number): WebGLShader | null {
+  private compile(source: string, type: number, bodyStartLine?: number): WebGLShader | null {
     const gl = this.gl;
     const shader = gl.createShader(type)!;
     gl.shaderSource(shader, source);
@@ -85,13 +94,13 @@ export class ShaderRunner {
     if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
       const log = gl.getShaderInfoLog(shader) || "erreur de compilation inconnue";
       gl.deleteShader(shader);
-      throw { stage: type === gl.VERTEX_SHADER ? "vertex" : "fragment", log } as RenderError;
+      throw { stage: type === gl.VERTEX_SHADER ? "vertex" : "fragment", log, bodyStartLine } as RenderError;
     }
     return shader;
   }
 
   /** Wraps a `mainImage`-shaped fragment body with the uniform header and entry point. */
-  private buildFullFsSource(fragmentBody: string): string {
+  private buildFullFsSource(fragmentBody: string): { source: string; bodyStartLine: number } {
     // iChannel0-3 are declared even though this single-pass runner never
     // binds anything to them — lets a shader written for Shadertoy (which
     // very commonly samples iChannel0 for noise/textures even outside
@@ -108,7 +117,11 @@ export class ShaderRunner {
       ? `\nvoid main(){ vec4 c; mainImage(c, gl_FragCoord.xy); outColor = c; }\n`
       : `\nvoid main(){ vec4 c; mainImage(c, gl_FragCoord.xy); gl_FragColor = c; }\n`;
 
-    return precisionHeader + fragmentBody + entry;
+    // A header ending in "...;\n" followed immediately by `fragmentBody`
+    // means the body's own first line is the line right after the last
+    // header newline — i.e. the header's newline count, 1-indexed.
+    const bodyStartLine = precisionHeader.split("\n").length;
+    return { source: precisionHeader + fragmentBody + entry, bodyStartLine };
   }
 
   /**
@@ -120,13 +133,13 @@ export class ShaderRunner {
    */
   tryCompile(fragmentBody: string): RenderError | null {
     const gl = this.gl;
-    const fullFsSource = this.buildFullFsSource(fragmentBody);
+    const { source: fullFsSource, bodyStartLine } = this.buildFullFsSource(fragmentBody);
     let vs: WebGLShader | null = null;
     let fs: WebGLShader | null = null;
     let program: WebGLProgram | null = null;
     try {
       vs = this.compile(this.isGL2 ? VERTEX_SRC : VERTEX_SRC_GL1, gl.VERTEX_SHADER);
-      fs = this.compile(fullFsSource, gl.FRAGMENT_SHADER);
+      fs = this.compile(fullFsSource, gl.FRAGMENT_SHADER, bodyStartLine);
       program = gl.createProgram()!;
       gl.attachShader(program, vs!);
       gl.attachShader(program, fs!);
@@ -151,11 +164,11 @@ export class ShaderRunner {
   /** (Re)compiles and links the given `mainImage`-shaped fragment body. */
   load(fragmentBody: string): boolean {
     const gl = this.gl;
-    const fullFsSource = this.buildFullFsSource(fragmentBody);
+    const { source: fullFsSource, bodyStartLine } = this.buildFullFsSource(fragmentBody);
 
     try {
       const vs = this.compile(this.isGL2 ? VERTEX_SRC : VERTEX_SRC_GL1, gl.VERTEX_SHADER);
-      const fs = this.compile(fullFsSource, gl.FRAGMENT_SHADER);
+      const fs = this.compile(fullFsSource, gl.FRAGMENT_SHADER, bodyStartLine);
       const program = gl.createProgram()!;
       gl.attachShader(program, vs!);
       gl.attachShader(program, fs!);
@@ -393,7 +406,13 @@ export class MultiPassRunner {
     gl.deleteFramebuffer(t.backFbo);
   }
 
-  private compileOne(source: string, type: number, passId: PassId, stage: "vertex" | "fragment"): WebGLShader {
+  private compileOne(
+    source: string,
+    type: number,
+    passId: PassId,
+    stage: "vertex" | "fragment",
+    bodyStartLine?: number,
+  ): WebGLShader {
     const gl = this.gl;
     const shader = gl.createShader(type)!;
     gl.shaderSource(shader, source);
@@ -401,15 +420,15 @@ export class MultiPassRunner {
     if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
       const log = gl.getShaderInfoLog(shader) || "erreur de compilation inconnue";
       gl.deleteShader(shader);
-      throw { passId, stage, log } as MultiPassError;
+      throw { passId, stage, log, bodyStartLine } as MultiPassError;
     }
     return shader;
   }
 
-  private buildFsSource(fragmentBody: string): string {
+  private buildFsSource(fragmentBody: string): { source: string; bodyStartLine: number } {
     const header = `#version 300 es\nprecision highp float;\nuniform vec3 iResolution;\nuniform float iTime;\nuniform float iTimeDelta;\nuniform int iFrame;\nuniform vec4 iMouse;\nuniform sampler2D iChannel0;\nuniform sampler2D iChannel1;\nuniform sampler2D iChannel2;\nuniform sampler2D iChannel3;\nout vec4 outColor;\n`;
     const entry = `\nvoid main(){ vec4 c; mainImage(c, gl_FragCoord.xy); outColor = c; }\n`;
-    return header + fragmentBody + entry;
+    return { source: header + fragmentBody + entry, bodyStartLine: header.split("\n").length };
   }
 
   private compilePass(passId: PassId, fragmentBody: string, channels: ChannelWiring[]): CompiledPass {
@@ -417,7 +436,8 @@ export class MultiPassRunner {
     const vs = this.compileOne(MULTIPASS_VERTEX_SRC, gl.VERTEX_SHADER, passId, "vertex");
     let fs: WebGLShader;
     try {
-      fs = this.compileOne(this.buildFsSource(fragmentBody), gl.FRAGMENT_SHADER, passId, "fragment");
+      const { source, bodyStartLine } = this.buildFsSource(fragmentBody);
+      fs = this.compileOne(source, gl.FRAGMENT_SHADER, passId, "fragment", bodyStartLine);
     } catch (e) {
       gl.deleteShader(vs);
       throw e;

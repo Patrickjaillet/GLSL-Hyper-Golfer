@@ -352,8 +352,38 @@ Shadertoy a besoin de :
       rendu golfé
 - [ ] Réglages de résolution custom et pixel ratio pour tester le rendu
       "tel qu'affiché sur Shadertoy" (qui downscale parfois)
-- [ ] Overlay d'erreurs GLSL avec **ligne exacte** surlignée dans
-      l'éditeur (aujourd'hui le message de log brut du driver seulement)
+- ✅ **FAIT (14/07/2026) — Overlay d'erreurs GLSL avec ligne exacte
+      surlignée dans l'éditeur.** `renderer.ts` calcule maintenant
+      `bodyStartLine` (la ligne, dans la source *compilée* — en-tête
+      inclus — où commence le code de l'appelant) au moment même de la
+      compilation, à partir du texte réel de l'en-tête utilisé, plutôt
+      que de coder en dur un nombre de lignes qui aurait pu dériver
+      silencieusement si l'en-tête changeait. `main.ts` extrait le
+      numéro de ligne du message driver (`ERROR: 0:N:`), soustrait
+      `bodyStartLine` pour remonter à la ligne dans le code affiché, et
+      surligne cette ligne via une nouvelle extension CodeMirror
+      (`editor.ts::setErrorLineHighlight`, `StateField` +
+      `StateEffect`). Deux cas distincts :
+  - **Source cassée** (`tryCompile` sur le code brut, multi-ligne, cas
+    le plus utile) — surligne dans l'éditeur Source. A demandé une
+    correction supplémentaire trouvée en testant : le code compilé pour
+    ce test est `common + "\n" + code`, mais l'éditeur Source
+    n'affiche que `code` seul (jamais Common) — sans soustraire le
+    nombre de lignes qu'occupe ce préfixe, le surlignage tombait sur la
+    mauvaise ligne (repéré en testant : `}` surligné au lieu de la
+    vraie ligne fautive). Corrigé (`commonPrefixLineCount()`),
+    revérifié : surligne exactement la ligne contenant l'identifiant
+    non déclaré dans un test délibérément cassé.
+  - **Golf cassé** (le code golfé lui-même) — surligne dans l'éditeur
+    Golfé. Valeur réelle plus limitée qu'annoncée : le code golfé est
+    normalement une seule ligne (pas de retour à la ligne dans la sortie
+    du moteur), donc le numéro de ligne calculé vaut quasiment toujours
+    1 — confirme qu'il y a une erreur sans vraiment la localiser dans
+    cette longue ligne, sauf si "Version justifiée" est active — et même
+    alors, le calcul reste basé sur le code minifié réellement compilé,
+    pas sur le texte reformaté affiché, donc le numéro peut ne plus
+    correspondre visuellement une fois reformaté. Documenté en
+    commentaire dans le code plutôt que caché.
 - [ ] Mode **VR/360** preview pour les shaders qui le supportent
 - [ ] Profilage GPU basique (temps par frame, pas juste FPS global)
 
@@ -384,8 +414,19 @@ Shadertoy a besoin de :
       plutôt que moteur.
   - [ ] tests e2e (Playwright) du parcours golf → viewport → copier
   - [ ] tests de non-régression visuelle (screenshot diff du viewport)
-  - [ ] lint TS strict (`eslint`) — `tsc -b` est déjà en CI (ci-dessus)
-        mais pas de linter dédié
+  - ✅ **FAIT (14/07/2026) — `eslint` (config plate `eslint.config.js`,
+        `typescript-eslint` en mode recommended)**, `npm run lint` câblé
+        en CI entre le type-check et le build. Zéro erreur au premier
+        run — deux règles désactivées explicitement, chacune avec sa
+        propre justification plutôt qu'un `/* eslint-disable */`
+        générique : `no-non-null-assertion` (30 occurrences de `!` sur
+        des `document.getElementById(...)` juste après avoir créé
+        l'élément dans le même template, un garde `if (!el) throw` à
+        chaque site serait du bruit pur) ; `no-explicit-any` retirée
+        après coup de la config une fois vérifié qu'elle ne s'appliquait
+        en fait à rien dans ce code (aucun `: any` explicite nulle
+        part — la justification initiale que j'avais écrite était
+        inexacte, corrigée avant de commiter).
   - ✅ **FAIT (13/07/2026) — `cargo clippy --all-targets -- -D warnings`
         en CI**, avant `cargo test` dans le même job. 7 avertissements
         trouvés au premier run local (needless_lifetimes,
