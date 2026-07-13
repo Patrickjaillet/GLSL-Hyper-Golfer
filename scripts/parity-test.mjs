@@ -18,8 +18,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const FIXTURES_DIR = join(ROOT, "fixtures");
 const GOLFER_TS = join(ROOT, "web", "src", "golfer.ts");
-const RUST_BIN_RELEASE = join(ROOT, "rust-core", "target", "release", "golf.exe");
-const RUST_BIN_DEBUG = join(ROOT, "rust-core", "target", "debug", "golf.exe");
+// Cargo only appends `.exe` on Windows — this ran exclusively on a
+// Windows sandbox until CI (Linux) exposed the hardcoded `.exe` as a
+// bug that made this script simply not find the binary at all there.
+const BIN_NAME = process.platform === "win32" ? "golf.exe" : "golf";
+const RUST_BIN_RELEASE = join(ROOT, "rust-core", "target", "release", BIN_NAME);
+const RUST_BIN_DEBUG = join(ROOT, "rust-core", "target", "debug", BIN_NAME);
 
 function findRustBinary() {
   for (const candidate of [RUST_BIN_RELEASE, RUST_BIN_DEBUG]) {

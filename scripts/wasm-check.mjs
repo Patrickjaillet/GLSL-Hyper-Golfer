@@ -17,7 +17,7 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const FIXTURES_DIR = join(ROOT, "fixtures");
 const WASM_JS = join(ROOT, "web", "src", "wasm-pkg", "glsl_golf_core.js");
 const WASM_BIN = join(ROOT, "web", "src", "wasm-pkg", "glsl_golf_core_bg.wasm");
-const RUST_BIN = join(ROOT, "rust-core", "target", "release", "golf.exe");
+const RUST_BIN = join(ROOT, "rust-core", "target", "release", process.platform === "win32" ? "golf.exe" : "golf");
 
 function runRust(source, aggressive) {
   const args = aggressive ? ["--aggressive"] : [];
