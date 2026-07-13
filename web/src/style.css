@@ -773,6 +773,25 @@ canvas#glcanvas-source {
   color: var(--cyan);
 }
 
+.warning-banner {
+  margin-top: 8px;
+  border: 1px solid var(--amber-dim);
+  background: rgba(232, 163, 61, 0.08);
+  color: var(--amber);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.55;
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  white-space: pre-wrap;
+  overflow: auto;
+  flex-shrink: 1;
+  min-height: 0;
+}
+.warning-banner[hidden] {
+  display: none;
+}
+
 .error-banner {
   display: none;
   margin-top: 8px;

@@ -93,9 +93,23 @@ classements), thèmes visuels, et optimisation mobile.
       quelques shaders CC0/CC-BY connus et les ajouter à `fixtures/`).
 - [ ] Score de confiance par passe (marquer certaines passes
       "expérimentales" vs "sûres" dans l'UI, avec avertissement)
-- [ ] Détecter et refuser proprement les shaders GLSL ES 1.00 vs 3.00
-      incompatibles (ex : `texture2D` vs `texture`) plutôt que produire
-      un résultat qui ne compile qu'à moitié
+- ✅ **FAIT, en partie (13/07/2026) — Détection GLSL ES 1.00 vs 3.00.**
+      `main.ts::detectLegacyGlslFunctions` scanne (regex à limites de
+      mots, pas un vrai parseur — cohérent avec le reste du moteur
+      token-heuristique) chaque passe pour `texture2D`/`textureCube`/
+      `shadow2D`/`texture1D`/`texture3D` et leurs variantes `Proj`/`Lod`,
+      absentes du contexte WebGL2/ES 3.00 dans lequel ce site compile
+      toujours. Affiche un bandeau d'avertissement distinct (ambre, pas
+      rouge — c'est un avertissement, pas une erreur de compilation)
+      *avant* même de tenter de compiler, plutôt que de laisser
+      l'utilisateur découvrir un message de driver "identifiant non
+      déclaré" pas franchement plus parlant. **"Détecter" fait, "refuser
+      proprement" pas fait** : le golf continue quand même (le bandeau
+      prévient, il ne bloque rien) — refuser activement demanderait de
+      décider ce que "refuser" veut dire dans une UI qui n'a pas de
+      notion d'échec bloquant ailleurs. Vérifié en headless (déclenche
+      bien le bandeau sur `texture2D(...)`, se retraduit correctement au
+      changement de langue).
 - [ ] Gestion propre des **erreurs de parsing** (aujourd'hui tout
       repose sur des heuristiques token-based ; ajouter un vrai mode
       "je ne comprends pas cette construction, je la laisse intacte"
@@ -288,10 +302,20 @@ Shadertoy a besoin de :
       dernière passe)
 - [ ] Sauvegarde automatique locale (IndexedDB) du travail en cours,
       avec plusieurs "brouillons" nommés
-- [ ] Raccourcis clavier complets (golfer = `Cmd/Ctrl+Enter`, etc.),
-      palette de commandes façon VS Code (`Cmd+K`)
-- [ ] Affichage de la **taille en octets réels** vs caractères
-      (important pour les concours "N caractères" en UTF‑8 vs ASCII)
+- ✅ **FAIT, en partie (13/07/2026) — `Ctrl/Cmd+Entrée` pour golfer**
+      depuis n'importe où, y compris le focus dans l'éditeur (CodeMirror
+      ne réserve pas cette combinaison, donc l'événement remonte
+      normalement jusqu'à l'écouteur `document`). **Palette de
+      commandes façon VS Code pas faite** — un raccourci ne justifiait
+      pas un système de palette entier.
+- ✅ **FAIT (13/07/2026) — Taille en octets réels (UTF-8) vs
+      caractères** — nouvelle statistique à côté de "car. golfés"
+      (`new TextEncoder().encode(...).length`, sommée sur tous les
+      buffers actifs). Pertinent dès qu'un shader contient des littéraux
+      non-ASCII (rare mais possible dans un commentaire ou un nom, et le
+      golf lui-même ne golfe qu'en ASCII donc les deux nombres
+      coïncident presque toujours en pratique — utile surtout comme
+      garde-fou visible si jamais ils divergent).
 - [ ] Compteur spécifique pour les formats de concours connus (tweet
       280, démo 4k/8k/64k, JS1k-style, etc.) avec badge "tient dans X"
 
@@ -356,11 +380,25 @@ Shadertoy a besoin de :
 
 ## 6. Accessibilité & internationalisation
 
-- [ ] Passer l'UI (actuellement 100% français en dur dans `main.ts`)
-      en **i18n** (fr/en au minimum — la communauté Shadertoy est très
-      majoritairement anglophone)
-- [ ] Audit accessibilité complet (contrastes, navigation clavier,
-      lecteurs d'écran, `aria-live` sur les stats qui changent)
+- ✅ **FAIT (13/07/2026) — i18n fr/en** — voir section 3 pour le détail
+      complet (`web/src/i18n.ts`), fait dans le cadre de la killer
+      feature 3 de la section 9.
+- 🟡 **PARTIEL (13/07/2026) — Accessibilité.** Pas un audit complet
+      (demanderait un vrai outil comme axe-core/Lighthouse, non lancé
+      cette session), mais plusieurs correctifs concrets faits en
+      passant : `aria-live="polite"` sur les bandes de statistiques
+      (annonce les changements de taux de réduction aux lecteurs
+      d'écran sans avoir à les surveiller activement), `aria-live=
+      "assertive"` sur le bandeau d'erreur, `aria-label` sur les
+      boutons/contrôles qui n'avaient qu'un symbole (⏸/✕) sans texte
+      accessible, et le bouton de suppression de buffer (un `<span
+      role="button">`, pas un vrai `<button>`, pour des raisons de
+      layout) a reçu un gestionnaire clavier Entrée/Espace explicite —
+      un rôle ARIA sans le comportement clavier qui va avec est pire
+      que pas de rôle du tout. **Non fait** : audit de contraste
+      colorimétrique formel (WCAG AA/AAA) de la palette existante,
+      test avec un vrai lecteur d'écran (NVDA/VoiceOver) plutôt que
+      des vérifications d'attributs.
 
 ---
 

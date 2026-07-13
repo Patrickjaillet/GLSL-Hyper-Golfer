@@ -30,6 +30,9 @@ const fr: Dict = {
   "btn.passes.title": "Choisir individuellement les passes actives",
   "btn.reset": "Réinitialiser",
   "btn.run": "Exécuter le golfing",
+  "btn.run.title": "Ctrl/Cmd+Entrée pour lancer depuis l'éditeur",
+  "pause.ariaLabel": "Pause / reprendre la lecture",
+  "buffer.add": "+ Buffer",
   "toggle.pretty.label": "Version justifiée",
   "toggle.pretty.title":
     "Réaffiche le code golfé sur plusieurs lignes indentées pour la lecture, sans changer le résultat réel : ce qui est copié et ce qui tourne dans le viewport reste la version minifiée.",
@@ -42,6 +45,7 @@ const fr: Dict = {
   "stat.outputChars": "car. golfés",
   "stat.renamed": "identifiants renommés",
   "stat.numbers": "nombres raccourcis",
+  "stat.outputBytes": "octets golfés (UTF-8)",
   "stat.deadLocals": "locaux morts supprimés",
   "stat.deadStores": "écritures mortes supprimées",
   "stat.folded": "constantes repliées",
@@ -87,6 +91,8 @@ const fr: Dict = {
   "shadertoy.unsupportedChannel": '{pass} iChannel{ch} : type "{type}" non supporté, mis à "aucune".',
   "shadertoy.unsupportedPass": 'Passe "{name}" de type "{type}" non supportée (son/cubemap), ignorée.',
   "lang.toggle.title": "Switch to English",
+  "warning.versionMismatch":
+    "{pass} utilise {funcs}, des fonctions GLSL ES 1.00 absentes du contexte WebGL2/ES 3.00 utilisé ici — remplace-les par texture()/textureProj()/etc. avant de golfer.",
 };
 
 const en: Dict = {
@@ -106,6 +112,9 @@ const en: Dict = {
   "btn.passes.title": "Choose which passes are active individually",
   "btn.reset": "Reset",
   "btn.run": "Run golf",
+  "btn.run.title": "Ctrl/Cmd+Enter to run from the editor",
+  "pause.ariaLabel": "Pause / resume playback",
+  "buffer.add": "+ Buffer",
   "toggle.pretty.label": "Formatted view",
   "toggle.pretty.title":
     "Re-displays the golfed code across multiple indented lines for readability, without changing the actual result: what gets copied and what runs in the viewport stays the minified version.",
@@ -118,6 +127,7 @@ const en: Dict = {
   "stat.outputChars": "golfed chars",
   "stat.renamed": "identifiers renamed",
   "stat.numbers": "numbers shortened",
+  "stat.outputBytes": "golfed bytes (UTF-8)",
   "stat.deadLocals": "dead locals removed",
   "stat.deadStores": "dead stores removed",
   "stat.folded": "constants folded",
@@ -162,6 +172,8 @@ const en: Dict = {
   "shadertoy.unsupportedChannel": '{pass} iChannel{ch}: type "{type}" not supported, set to "none".',
   "shadertoy.unsupportedPass": 'Pass "{name}" of type "{type}" not supported (sound/cubemap), skipped.',
   "lang.toggle.title": "Passer en français",
+  "warning.versionMismatch":
+    "{pass} uses {funcs}, GLSL ES 1.00 function(s) missing from the WebGL2/ES 3.00 context used here — replace with texture()/textureProj()/etc. before golfing.",
 };
 
 const DICTS: Record<Locale, Dict> = { fr, en };

@@ -136,7 +136,7 @@ app.innerHTML = `
           <button class="btn ghost small" id="export-btn" type="button" data-i18n-title="btn.export.title" title="">⇧ Export</button>
           <button class="btn ghost small" id="passes-btn" type="button" aria-haspopup="true" aria-expanded="false" data-i18n-title="btn.passes.title" title="">⚙ Passes</button>
           <button class="btn ghost" id="reset-btn" type="button" data-i18n="btn.reset">Réinitialiser</button>
-          <button class="btn primary" id="run-btn" type="button" data-i18n="btn.run">Exécuter le golfing</button>
+          <button class="btn primary" id="run-btn" type="button" data-i18n="btn.run" data-i18n-title="btn.run.title" title="">Exécuter le golfing</button>
         </div>
       </section>
 
@@ -159,13 +159,14 @@ app.innerHTML = `
             <div class="meter-ticks" id="ticks"></div>
             <span class="meter-value" id="ratio-value">0%</span>
           </div>
-          <div class="stat-strip">
+          <div class="stat-strip" aria-live="polite">
             <span><b id="c-in">0</b> <span data-i18n="stat.inputChars">car. source</span></span>
             <span><b id="c-out">0</b> <span data-i18n="stat.outputChars">car. golfés</span></span>
+            <span><b id="c-out-bytes">0</b> <span data-i18n="stat.outputBytes">octets golfés (UTF-8)</span></span>
             <span><b id="c-renamed">0</b> <span data-i18n="stat.renamed">identifiants renommés</span></span>
             <span><b id="c-numbers">0</b> <span data-i18n="stat.numbers">nombres raccourcis</span></span>
           </div>
-          <div class="stat-strip" id="aggressive-stats" hidden>
+          <div class="stat-strip" id="aggressive-stats" hidden aria-live="polite">
             <span><b id="c-dead">0</b> <span data-i18n="stat.deadLocals">locaux morts supprimés</span></span>
             <span><b id="c-stores">0</b> <span data-i18n="stat.deadStores">écritures mortes supprimées</span></span>
             <span><b id="c-folded">0</b> <span data-i18n="stat.folded">constantes repliées</span></span>
@@ -176,7 +177,8 @@ app.innerHTML = `
           <div class="stat-strip" id="per-pass-stats"></div>
         </div>
 
-        <div class="error-banner" id="error-banner"></div>
+        <div class="warning-banner" id="warning-banner" hidden></div>
+        <div class="error-banner" id="error-banner" aria-live="assertive"></div>
       </section>
 
       <div class="resizer" id="resizer-2" tabindex="0" data-i18n-title="buffer.resizer.title" title=""></div>
@@ -202,7 +204,7 @@ app.innerHTML = `
               <span id="res-value">--×--</span>
             </div>
             <div class="viewport-controls">
-              <button class="icon-btn" id="pause-btn" type="button" data-i18n-title="pause.title" title="">⏸</button>
+              <button class="icon-btn" id="pause-btn" type="button" data-i18n-title="pause.title" data-i18n-aria-label="pause.ariaLabel" title="" aria-label="">⏸</button>
             </div>
           </div>
         </div>
@@ -239,10 +241,14 @@ function applyTranslations(): void {
   document.querySelectorAll<HTMLElement>("[data-i18n-title]").forEach((el) => {
     el.title = t(el.dataset.i18nTitle!);
   });
+  document.querySelectorAll<HTMLElement>("[data-i18n-aria-label]").forEach((el) => {
+    el.setAttribute("aria-label", t(el.dataset.i18nAriaLabel!));
+  });
   langToggle.textContent = getLocale() === "fr" ? "EN" : "FR";
   renderBufferTabs();
   renderChannelRow();
   renderOutput();
+  updateLegacyWarnings();
 }
 
 const bufferTabsEl = document.getElementById("buffer-tabs")!;
@@ -252,6 +258,7 @@ const ticks = document.getElementById("ticks")!;
 const ratioValue = document.getElementById("ratio-value")!;
 const cIn = document.getElementById("c-in")!;
 const cOut = document.getElementById("c-out")!;
+const cOutBytes = document.getElementById("c-out-bytes")!;
 const cRenamed = document.getElementById("c-renamed")!;
 const cNumbers = document.getElementById("c-numbers")!;
 const aggressiveStatsRow = document.getElementById("aggressive-stats")!;
@@ -277,6 +284,7 @@ const exportBtn = document.getElementById("export-btn") as HTMLButtonElement;
 const langToggle = document.getElementById("lang-toggle") as HTMLButtonElement;
 const engineLabelEl = document.getElementById("engine-label")!;
 const errorBanner = document.getElementById("error-banner")!;
+const warningBanner = document.getElementById("warning-banner")!;
 const runBtn = document.getElementById("run-btn") as HTMLButtonElement;
 const resetBtn = document.getElementById("reset-btn") as HTMLButtonElement;
 const copyBtn = document.getElementById("copy-btn") as HTMLButtonElement;
@@ -306,6 +314,39 @@ for (let i = 0; i < TICK_COUNT; i++) {
   const tick = document.createElement("div");
   tick.className = "tick";
   ticks.appendChild(tick);
+}
+
+// GLSL ES 1.00-only sampling functions — this app always runs shaders
+// in a WebGL2/ES 3.00 context (`MultiPassRunner`/`ShaderRunner`'s GL2
+// path both declare `#version 300 es`), where these simply don't exist
+// as builtins. A shader ported from an old ES 1.00/WebGL1 codebase that
+// still calls them fails to compile with an unhelpful "undeclared
+// identifier" from the driver — this catches it before that point and
+// names the actual problem. Deliberately just a word-boundary regex
+// scan, not real parsing: matches the rest of this token-heuristic
+// codebase, and a false positive here only produces an extra hint, not
+// a broken golf.
+const LEGACY_GLSL_FUNCTIONS = [
+  "texture2DProjLod",
+  "texture2DProj",
+  "texture2DLod",
+  "texture2D",
+  "textureCubeLod",
+  "textureCube",
+  "texture3DProj",
+  "texture3D",
+  "shadow2DProj",
+  "shadow2D",
+  "texture1DProj",
+  "texture1D",
+];
+
+function detectLegacyGlslFunctions(code: string): string[] {
+  const found: string[] = [];
+  for (const fn of LEGACY_GLSL_FUNCTIONS) {
+    if (new RegExp(`\\b${fn}\\s*\\(`).test(code)) found.push(fn);
+  }
+  return found;
 }
 
 /**
@@ -405,13 +446,13 @@ function renderBufferTabs(): void {
       .map((id) => {
         const removable = BUFFER_SLOTS.includes(id as BufferSlot);
         const closeBtn = removable
-          ? `<span class="buffer-tab-close" data-remove="${id}" title="${t("buffer.remove.title")}">✕</span>`
+          ? `<span class="buffer-tab-close" data-remove="${id}" role="button" tabindex="0" title="${t("buffer.remove.title")}" aria-label="${t("buffer.remove.title")} (${BUFFER_LABELS[id]})">✕</span>`
           : "";
-        return `<button class="buffer-tab-btn${id === currentTab ? " active" : ""}" data-buffer-tab="${id}" type="button">${BUFFER_LABELS[id]}${closeBtn}</button>`;
+        return `<button class="buffer-tab-btn${id === currentTab ? " active" : ""}" data-buffer-tab="${id}" type="button" aria-pressed="${id === currentTab}">${BUFFER_LABELS[id]}${closeBtn}</button>`;
       })
       .join("") +
     (activeSlots().length < BUFFER_SLOTS.length
-      ? `<button class="buffer-tab-add" id="add-buffer-btn" type="button">+ Buffer</button>`
+      ? `<button class="buffer-tab-add" id="add-buffer-btn" type="button">${t("buffer.add")}</button>`
       : "");
 
   bufferTabsEl.querySelectorAll<HTMLButtonElement>("[data-buffer-tab]").forEach((btn) => {
@@ -424,6 +465,15 @@ function renderBufferTabs(): void {
     el.addEventListener("click", (e) => {
       e.stopPropagation();
       removeBuffer(el.dataset.remove as BufferSlot);
+    });
+    // A `role="button"` span (not a real <button>) doesn't get Enter/Space
+    // activation for free — wire it explicitly for keyboard users.
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        e.stopPropagation();
+        removeBuffer(el.dataset.remove as BufferSlot);
+      }
     });
   });
   const addBtn = document.getElementById("add-buffer-btn");
@@ -650,6 +700,13 @@ passesPopover.addEventListener("click", (e) => e.stopPropagation());
 document.addEventListener("click", closePopover);
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closePopover();
+  // Ctrl/Cmd+Enter runs the golfer from anywhere, including while the
+  // CodeMirror editor has focus — this isn't a key CodeMirror binds by
+  // default, so it bubbles to this document-level listener normally.
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    golfProject();
+  }
 });
 window.addEventListener("resize", closePopover);
 
@@ -715,6 +772,18 @@ function renderOutput(): void {
   setEditorContent(outputEditor, prettyToggle.checked ? prettyPrintGolfed(result.code) : result.code);
 }
 
+/** Recomputed on every golf run *and* on language switch (so an already-visible warning re-translates instead of staying stale). */
+function updateLegacyWarnings(): void {
+  const legacyWarnings = compilablePasses()
+    .map((p) => {
+      const fns = detectLegacyGlslFunctions(common + "\n" + p.state.code);
+      return fns.length > 0 ? t("warning.versionMismatch", { pass: BUFFER_LABELS[p.id], funcs: fns.join(", ") }) : null;
+    })
+    .filter((w): w is string => w !== null);
+  warningBanner.hidden = legacyWarnings.length === 0;
+  warningBanner.textContent = legacyWarnings.join("\n");
+}
+
 function golfProject(): void {
   const options = currentAggressiveOptions();
   const passes = compilablePasses();
@@ -723,13 +792,16 @@ function golfProject(): void {
     lastResults[p.id] = golfImpl(common + "\n" + p.state.code, options);
   }
   renderOutput();
+  updateLegacyWarnings();
 
   const totalIn = passes.reduce((s, p) => s + lastResults[p.id]!.stats.inputChars, 0);
   const totalOut = passes.reduce((s, p) => s + lastResults[p.id]!.stats.outputChars, 0);
+  const totalOutBytes = passes.reduce((s, p) => s + new TextEncoder().encode(lastResults[p.id]!.code).length, 0);
   const totalRenamed = passes.reduce((s, p) => s + lastResults[p.id]!.stats.renamedCount, 0);
   const totalNumbers = passes.reduce((s, p) => s + lastResults[p.id]!.stats.numbersShortened, 0);
   cIn.textContent = String(totalIn);
   cOut.textContent = String(totalOut);
+  cOutBytes.textContent = String(totalOutBytes);
   cRenamed.textContent = String(totalRenamed);
   cNumbers.textContent = String(totalNumbers);
 
