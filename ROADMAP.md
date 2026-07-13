@@ -386,7 +386,15 @@ Shadertoy a besoin de :
   - [ ] tests de non-régression visuelle (screenshot diff du viewport)
   - [ ] lint TS strict (`eslint`) — `tsc -b` est déjà en CI (ci-dessus)
         mais pas de linter dédié
-  - [ ] `cargo clippy --deny warnings` en CI
+  - ✅ **FAIT (13/07/2026) — `cargo clippy --all-targets -- -D warnings`
+        en CI**, avant `cargo test` dans le même job. 7 avertissements
+        trouvés au premier run local (needless_lifetimes,
+        unnecessary_map_or ×3, needless_borrow, collapsible_if, et une
+        fonction `lexer::tokenize` jamais appelée nulle part) — tous
+        des refactors cosmétiques sans impact fonctionnel, corrigés
+        (`cargo clippy --fix` pour la majorité, suppression manuelle de
+        la fonction morte), retesté (`cargo test` + parité) pour
+        confirmer un comportement inchangé avant de commiter.
   - [ ] audit de bundle size (le WASM + JS doivent rester légers) —
         d'autant plus pertinent maintenant : CodeMirror (section 3) a
         fait passer le JS gzippé d'environ 55 Ko à ~146 Ko
@@ -427,8 +435,13 @@ Shadertoy a besoin de :
 
 ## 7. Documentation & pédagogie
 
-- [ ] Changelog public par version du moteur, avec exemples de shaders
-      que chaque nouvelle passe sait golfer en plus
+- ✅ **FAIT, en partie (13/07/2026) — `CHANGELOG.md`** à la racine,
+      classé par date (pas de version formelle, ce projet ne publie
+      rien sur un registre). Pas encore de version "0.2.0" etc. — juste
+      des entrées datées Ajouté/Corrigé/Nettoyage, ce qui suffit tant
+      qu'il n'y a pas de release versionnée à documenter. Pas
+      d'exemples de shaders concrets par passe (viendrait naturellement
+      avec le "playground de comparaison" juste en dessous, non fait).
 - [ ] Playground de comparaison "notre golf vs golf manuel d'expert"
       pour construire la confiance dans l'outil
 

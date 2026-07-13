@@ -34,7 +34,7 @@ fn is_unary_prefix(c: char) -> bool {
     matches!(c, '-' | '+' | '!' | '~')
 }
 
-fn find_ident<'a>(items: &'a [Item], i: usize) -> Option<&'a str> {
+fn find_ident(items: &[Item], i: usize) -> Option<&str> {
     match items.get(i).map(|it| &it.tok) {
         Some(Tok::Ident(s)) => Some(s.as_str()),
         _ => None,
@@ -131,10 +131,10 @@ pub fn eliminate_dead_locals(items: Vec<Item>, stats: &mut AggressiveStats) -> V
     while i < items.len() {
         let at_boundary = out
             .last()
-            .map_or(true, |it: &Item| matches!(it.tok, Tok::Punct(';') | Tok::Punct('{') | Tok::Punct('}')));
+            .is_none_or(|it: &Item| matches!(it.tok, Tok::Punct(';') | Tok::Punct('{') | Tok::Punct('}')));
 
         if at_boundary {
-            if let Some(end) = try_remove_dead_decl(&items, i, &type_kw, &freq) {
+            if let Some(end) = try_remove_dead_decl(&items, i, type_kw, &freq) {
                 stats.dead_locals_removed += 1;
                 i = end;
                 continue;
@@ -642,7 +642,7 @@ pub fn merge_declarations(items: Vec<Item>, stats: &mut AggressiveStats) -> Vec<
     while i < items.len() {
         let at_boundary = out
             .last()
-            .map_or(true, |it: &Item| matches!(it.tok, Tok::Punct(';') | Tok::Punct('{') | Tok::Punct('}')));
+            .is_none_or(|it: &Item| matches!(it.tok, Tok::Punct(';') | Tok::Punct('{') | Tok::Punct('}')));
 
         if at_boundary {
             let decl_start = if let (Some(Tok::Ident(t)), Some(Tok::Ident(_))) = (

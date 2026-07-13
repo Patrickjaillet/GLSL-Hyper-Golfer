@@ -497,7 +497,7 @@ pub fn golf_with_options(source: &str, aggressive: AggressiveOptions) -> GolfRes
                 || match scope {
                     Scope::Local(idx) => local_taken
                         .get(idx)
-                        .map_or(false, |s| s.contains(&candidate)),
+                        .is_some_and(|s| s.contains(&candidate)),
                     Scope::Global => local_taken.values().any(|s| s.contains(&candidate)),
                 };
             if collides {
@@ -672,15 +672,14 @@ fn layout(items: &[Item]) -> String {
         let cur_word_like = is_word_like(&item.tok);
         let mut need_space = prev_word_like && cur_word_like;
 
-        if !need_space && i > 0 && !out.is_empty() {
-            if matches!(&items[i - 1].tok, Tok::Punct(_)) && matches!(&item.tok, Tok::Punct(_)) {
+        if !need_space && i > 0 && !out.is_empty()
+            && matches!(&items[i - 1].tok, Tok::Punct(_)) && matches!(&item.tok, Tok::Punct(_)) {
                 let prev_char = out.chars().last().unwrap();
                 let next_char = item.text.chars().next().unwrap_or(' ');
                 if item.space_before && forms_ambiguous_pair(prev_char, next_char) {
                     need_space = true;
                 }
             }
-        }
 
         if need_space {
             out.push(' ');

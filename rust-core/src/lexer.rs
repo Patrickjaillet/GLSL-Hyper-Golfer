@@ -134,8 +134,3 @@ pub fn tokenize_spaced(src: &str) -> Vec<(Tok, bool)> {
 
     out
 }
-
-/// Convenience wrapper for callers that don't need spacing info.
-pub fn tokenize(src: &str) -> Vec<Tok> {
-    tokenize_spaced(src).into_iter().map(|(t, _)| t).collect()
-}
