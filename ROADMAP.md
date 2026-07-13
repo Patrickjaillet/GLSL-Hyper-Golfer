@@ -174,8 +174,25 @@ classements), thèmes visuels, et optimisation mobile.
       GLSL séparé), donc `golf_with_options` golfe chaque buffer
       indépendamment sans aucun changement d'API. Voir la note détaillée
       en section 2.
-- [ ] CLI (`src/bin/golf.rs`) : ajouter flags pour toutes les options,
-      mode `--watch`, mode `--diff-only`
+- ✅ **FAIT (14/07/2026) — CLI : flags pour toutes les options,
+      `--watch`, `--diff-only`, `--help`.** Un `--no-<passe>` par passe
+      agressive (actif seulement combiné à `-a`), `--diff-only` (n'
+      imprime que le résumé de stats, pas le code golfé — pas un vrai
+      diff textuel : le golfé étant minifié, un diff ligne à ligne
+      n'aurait pas de sens, c'est documenté explicitement dans
+      `--help` plutôt que de survendre la fonctionnalité), `--watch`
+      (surveillance par sondage du mtime toutes les 300ms, sans
+      nouvelle dépendance — un vrai crate d'évènements filesystem
+      serait plus efficace mais le sondage suffit largement pour un
+      humain qui édite un shader). **Corrigé au passage** : un flag
+      inconnu (ex. `--help` avant ce correctif) était silencieusement
+      traité comme un chemin de fichier, produisant une erreur "fichier
+      introuvable" déroutante plutôt qu'un message utile — tout
+      argument commençant par `-` non reconnu échoue maintenant
+      proprement avec un renvoi vers `--help`. Vérifié manuellement (
+      `--help`, chaque `--no-*`, `--diff-only`, `--watch` avec un
+      fichier temporaire, rejet d'un flag inconnu) + suite complète
+      (`cargo test`, clippy, parité 32/32) inchangée.
 
 ---
 
