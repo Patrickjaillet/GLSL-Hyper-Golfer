@@ -65,11 +65,32 @@ classements), thèmes visuels, et optimisation mobile.
       préserve l'AST-équivalence (pas juste des tests golden)
 
 ### 1.2 Robustesse / sûreté
-- [ ] **Fuzzing** du tokenizer et de chaque passe (`cargo-fuzz` ou
-      `proptest`) — génère des shaders aléatoires valides et vérifie
-      que golfé == source après évaluation, ou que ça ne panique jamais
-- [ ] Suite de **shaders réels golden** (rip depuis Shadertoy, avec
-      permission/licence CC vérifiée) comme corpus de non-régression
+- ✅ **FAIT (13/07/2026) — Fuzzing via `proptest`** (`rust-core/tests/fuzz_robustness.rs`,
+      3 propriétés, ~768 entrées aléatoires par run). `cargo-fuzz`
+      (libFuzzer) écarté au profit de `proptest` : fonctionne sur stable
+      (pas de nightly requis), s'intègre comme un `#[test]` normal donc
+      tourne dans le `cargo test` déjà câblé en CI (voir section 5) sans
+      job séparé, et fait du shrinking automatique vers un cas minimal
+      en cas d'échec. Trois propriétés, volontairement **pas** "golfé ==
+      source après évaluation" (prouver l'équivalence sémantique
+      demanderait un vrai évaluateur GLSL, hors de portée) mais "ne
+      panique jamais", plus faible mais honnête et automatisable :
+      (1) Unicode arbitraire (`.{0,400}` — teste la robustesse aux
+      limites de caractères multi-octets, la classe de bug la plus
+      probable dans un tokenizer qui tranche des `&str` par offset
+      d'octet), (2) "bruit" en forme de GLSL (identifiants/nombres/
+      ponctuation/accolades/préprocesseur, plus susceptible de titiller
+      les heuristiques de déclaration/accolades/nombres que de
+      l'Unicode uniformément aléatoire), (3) troncature aléatoire de
+      shaders réels (`fixtures/fractal.glsl`, `dead_stores.glsl`,
+      `define_safety.glsl`) — le cas de "cassure" le plus probable en
+      usage réel (collage tronqué), pas du bruit pur. Les 3 passent sur
+      ~768 entrées sans aucun panic trouvé.
+- [ ] Suite de **shaders réels golden** — **hors de ma portée** :
+      nécessiterait de récupérer des shaders Shadertoy avec licence
+      vérifiée, une décision légale/éditoriale qui n'est pas la mienne à
+      prendre. Reste faisable manuellement par l'utilisateur (choisir
+      quelques shaders CC0/CC-BY connus et les ajouter à `fixtures/`).
 - [ ] Score de confiance par passe (marquer certaines passes
       "expérimentales" vs "sûres" dans l'UI, avec avertissement)
 - [ ] Détecter et refuser proprement les shaders GLSL ES 1.00 vs 3.00
@@ -86,8 +107,13 @@ classements), thèmes visuels, et optimisation mobile.
 - [ ] API `golf_with_options` acceptant une **whitelist de noms à ne
       jamais renommer** (utile pour les shaders qui exposent des
       uniforms custom)
-- [ ] Support de **plusieurs shaders/buffers en une seule passe** (voir
-      section Shadertoy ci-dessous) avec renommage cohérent inter-fichiers
+- ✅ **FAIT (13/07/2026) — Support de plusieurs buffers en une seule
+      passe** (voir section 2) — mais **pas** de "renommage cohérent
+      inter-fichiers" comme prévu ici à l'origine : il s'est avéré que
+      ce n'est pas nécessaire (chaque buffer compile comme un programme
+      GLSL séparé), donc `golf_with_options` golfe chaque buffer
+      indépendamment sans aucun changement d'API. Voir la note détaillée
+      en section 2.
 - [ ] CLI (`src/bin/golf.rs`) : ajouter flags pour toutes les options,
       mode `--watch`, mode `--diff-only`
 
@@ -225,14 +251,28 @@ Shadertoy a besoin de :
 
 ## 5. Qualité, tests & CI
 
-- [ ] Le workflow CI actuel ne fait que builder — ajouter :
-  - [ ] `cargo test` sur chaque PR
+- ✅ **FAIT (13/07/2026) — Le workflow CI ne faisait *aucun* test, même
+      pas `cargo test`.** Ajouté `.github/workflows/ci.yml` (séparé de
+      `deploy-pages.yml`, qui reste uniquement responsable du build/
+      déploiement) avec 3 jobs sur chaque push/PR : `cargo test
+      --all-targets` (unitaires + les 3 propriétés fuzz de la section
+      1.2), `tsc -b` + `npm run build` côté web, et
+      `scripts/parity-test.mjs` (Rust CLI ↔ port TS). *Non vérifié en
+      conditions réelles* (un push/PR déclenchera le premier run
+      réel — je n'ai pas pu observer un run GitHub Actions de ce
+      nouveau fichier avant de l'écrire, seulement valider sa syntaxe
+      YAML localement).
   - [ ] tests e2e (Playwright) du parcours golf → viewport → copier
   - [ ] tests de non-régression visuelle (screenshot diff du viewport)
-  - [ ] lint TS strict (`eslint`, `tsc --noEmit` en CI, pas juste au
-        build)
+  - [ ] lint TS strict (`eslint`) — `tsc -b` est déjà en CI (ci-dessus)
+        mais pas de linter dédié
   - [ ] `cargo clippy --deny warnings` en CI
   - [ ] audit de bundle size (le WASM + JS doivent rester légers)
+  - [ ] `node scripts/wasm-check.mjs` en CI — délibérément pas ajouté
+        cette fois : nécessiterait d'installer la cible
+        `wasm32-unknown-unknown` + `wasm-pack` dans le job, un coût de
+        temps de CI non négligeable pour un troisième niveau de parité
+        déjà couvert indirectement par `cargo test` (même code source)
 - [ ] Coverage rapport publié (codecov ou équivalent)
 - [ ] Benchmarks de perf du moteur (`criterion`) suivis dans le temps
       pour détecter les régressions sur gros shaders
@@ -287,8 +327,17 @@ de golf GLSL, dans l'ordre d'impact probable :
       détail exact de ce qui reste). Import/export non vérifiés contre
       l'API Shadertoy réelle (pas de réseau/clé API disponible en
       session), reste à tester par l'utilisateur.
-- [ ] 2. **Preuve de correction automatisée** (fuzzing + diff visuel,
-      sections 1.2 et 4) — la confiance est le principal frein à
-      l'adoption d'un golfeur agressif
+- 🟡 **PARTIEL (13/07/2026) — 2. Preuve de correction automatisée**
+      (sections 1.2 et 5) — fuzzing `proptest` fait (3 propriétés, "ne
+      panique jamais" sur ~768 entrées adversariales/quasi-GLSL/shaders
+      tronqués) **et** câblé en CI sur chaque push/PR (`ci.yml`), donc
+      la preuve tourne en continu plutôt qu'une seule fois. Reste non
+      fait : le "diff visuel" ligne à ligne/token à token entre source
+      et golfé (en réalité section 3, pas 4 — la roadmap d'origine
+      référençait la mauvaise section ici) et le "rapport diff
+      sémantique formel" de la section 1.1. La preuve actuelle couvre
+      "ne crashe jamais", pas "produit un résultat sémantiquement
+      équivalent" — cette dernière demanderait un vrai évaluateur GLSL,
+      un projet à part entière.
 - [ ] 3. **Éditeur pro (Monaco/CodeMirror) + i18n anglais** — condition
       d'entrée pour toucher la communauté Shadertoy internationale
