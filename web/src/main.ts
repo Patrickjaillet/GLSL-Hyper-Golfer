@@ -173,6 +173,7 @@ app.innerHTML = `
             <span><b id="c-folded">0</b> <span data-i18n="stat.folded">constantes repliées</span></span>
             <span><b id="c-vectors">0</b> <span data-i18n="stat.constantVectors">vecteurs constants réduits</span></span>
             <span><b id="c-compound">0</b> <span data-i18n="stat.compound">affectations composées</span></span>
+            <span><b id="c-incdec">0</b> <span data-i18n="stat.incDec">incréments/décréments</span></span>
             <span><b id="c-merged">0</b> <span data-i18n="stat.merged">déclarations fusionnées</span></span>
             <span><b id="c-braces">0</b> <span data-i18n="stat.braces">blocs d'accolades supprimés</span></span>
             <span><b id="c-trailing-return">0</b> <span data-i18n="stat.trailingReturn">return finaux supprimés</span></span>
@@ -230,6 +231,9 @@ app.innerHTML = `
       <label data-i18n-title="pass.compound.title" title="">
         <input type="checkbox" id="pass-compound" checked /><span data-i18n="pass.compound.label">affectations composées</span>
       </label>
+      <label data-i18n-title="pass.incDec.title" title="">
+        <input type="checkbox" id="pass-inc-dec" checked /><span data-i18n="pass.incDec.label">incréments/décréments</span>
+      </label>
       <label data-i18n-title="pass.merge.title" title="">
         <input type="checkbox" id="pass-merge" checked /><span data-i18n="pass.merge.label">fusion déclarations</span>
       </label>
@@ -280,6 +284,7 @@ const cStores = document.getElementById("c-stores")!;
 const cFolded = document.getElementById("c-folded")!;
 const cVectors = document.getElementById("c-vectors")!;
 const cCompound = document.getElementById("c-compound")!;
+const cIncDec = document.getElementById("c-incdec")!;
 const cBraces = document.getElementById("c-braces")!;
 const cTrailingReturn = document.getElementById("c-trailing-return")!;
 const cMerged = document.getElementById("c-merged")!;
@@ -290,6 +295,7 @@ const passDeadStores = document.getElementById("pass-dead-stores") as HTMLInputE
 const passFoldConstants = document.getElementById("pass-fold-constants") as HTMLInputElement;
 const passConstantVectors = document.getElementById("pass-constant-vectors") as HTMLInputElement;
 const passCompound = document.getElementById("pass-compound") as HTMLInputElement;
+const passIncDec = document.getElementById("pass-inc-dec") as HTMLInputElement;
 const passMerge = document.getElementById("pass-merge") as HTMLInputElement;
 const passBraces = document.getElementById("pass-braces") as HTMLInputElement;
 const passTrailingReturn = document.getElementById("pass-trailing-return") as HTMLInputElement;
@@ -299,6 +305,7 @@ const passCheckboxes = [
   passFoldConstants,
   passConstantVectors,
   passCompound,
+  passIncDec,
   passMerge,
   passBraces,
   passTrailingReturn,
@@ -808,6 +815,7 @@ function currentAggressiveOptions(): AggressiveOptions {
     reduceConstantVectors: passConstantVectors.checked,
     stripTrailingVoidReturn: passTrailingReturn.checked,
     compoundAssignments: passCompound.checked,
+    incrementDecrement: passIncDec.checked,
     mergeDeclarations: passMerge.checked,
     stripRedundantBraces: passBraces.checked,
   };
@@ -908,6 +916,7 @@ function golfProject(): void {
   cFolded.textContent = String(sumAgg("constantsFolded"));
   cVectors.textContent = String(sumAgg("constantVectorsReduced"));
   cCompound.textContent = String(sumAgg("compoundAssignments"));
+  cIncDec.textContent = String(sumAgg("incrementsDecrements"));
   cMerged.textContent = String(sumAgg("declarationsMerged"));
   cBraces.textContent = String(sumAgg("bracesRemoved"));
   cTrailingReturn.textContent = String(sumAgg("trailingVoidReturnsRemoved"));

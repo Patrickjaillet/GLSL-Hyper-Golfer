@@ -27,6 +27,7 @@ OPTIONS:
     --no-reduce-vectors     With -a, disable constant vector reduction.
     --no-trailing-return    With -a, disable trailing void-return removal.
     --no-compound           With -a, disable compound-assignment rewriting.
+    --no-inc-dec            With -a, disable +=1/-=1 -> ++/-- rewriting.
     --no-merge              With -a, disable declaration merging.
     --no-braces             With -a, disable redundant-brace stripping.
     --diff-only             Print only the stats summary (to stdout in
@@ -51,13 +52,14 @@ fn print_stats(result: &GolfResult, aggressive: bool, to_stdout: bool) {
         result.stats.numbers_shortened,
         if aggressive {
             format!(
-                ", {} locaux morts supprimes, {} ecritures mortes supprimees, {} constantes repliees, {} vecteurs constants reduits, {} return finaux supprimes, {} affectations composees, {} declarations fusionnees, {} blocs d'accolades supprimes",
+                ", {} locaux morts supprimes, {} ecritures mortes supprimees, {} constantes repliees, {} vecteurs constants reduits, {} return finaux supprimes, {} affectations composees, {} increments/decrements, {} declarations fusionnees, {} blocs d'accolades supprimes",
                 result.stats.aggressive.dead_locals_removed,
                 result.stats.aggressive.dead_stores_removed,
                 result.stats.aggressive.constants_folded,
                 result.stats.aggressive.constant_vectors_reduced,
                 result.stats.aggressive.trailing_void_returns_removed,
                 result.stats.aggressive.compound_assignments,
+                result.stats.aggressive.increments_decrements,
                 result.stats.aggressive.declarations_merged,
                 result.stats.aggressive.braces_removed,
             )
@@ -161,6 +163,10 @@ fn main() -> ExitCode {
             }
             "--no-compound" => {
                 options.compound_assignments = false;
+                args.remove(i);
+            }
+            "--no-inc-dec" => {
+                options.increment_decrement = false;
                 args.remove(i);
             }
             "--no-merge" => {

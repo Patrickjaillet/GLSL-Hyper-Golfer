@@ -529,6 +529,7 @@ export interface AggressiveStats {
   deadStoresRemoved: number;
   constantVectorsReduced: number;
   trailingVoidReturnsRemoved: number;
+  incrementsDecrements: number;
 }
 
 function newAggressiveStats(): AggressiveStats {
@@ -541,6 +542,7 @@ function newAggressiveStats(): AggressiveStats {
     deadStoresRemoved: 0,
     constantVectorsReduced: 0,
     trailingVoidReturnsRemoved: 0,
+    incrementsDecrements: 0,
   };
 }
 
@@ -901,6 +903,50 @@ function compoundAssignments(items: Token[], stats: AggressiveStats): Token[] {
           i = end;
           continue;
         }
+      }
+    }
+
+    out.push(items[i]);
+    i++;
+  }
+  return out;
+}
+
+const INC_DEC_OPS = new Set(["+", "-"]);
+
+/**
+ * Mirrors `aggressive.rs::increment_decrement` exactly: rewrites
+ * `a += 1;` / `a -= 1;` into the prefix form `++a;` / `--a;` (one
+ * character shorter), meant to run right after compoundAssignments so
+ * `a = a + 1;` (already folded to `a += 1;` by then) benefits too.
+ * Prefix, never postfix — `a += 1` used as a sub-expression evaluates
+ * to the *new* value of `a`, same as prefix `++a`, but postfix `a++`
+ * would silently change that value. Only fires when the amount is
+ * *exactly* `1`/`1.` (the already-shortened text — `1.0` becomes `1.`
+ * upstream before this pass ever runs), never `1u`/`1.0f`/`1e0`.
+ */
+function incrementDecrement(items: Token[], stats: AggressiveStats): Token[] {
+  const out: Token[] = [];
+  let i = 0;
+  while (i < items.length) {
+    const a = items[i];
+    const opTok = items[i + 1];
+    const eq = items[i + 2];
+    const value = items[i + 3];
+    const matches =
+      a && a.kind === "ident" &&
+      opTok && opTok.kind === "punct" && INC_DEC_OPS.has(opTok.text) &&
+      isPunct(eq, "=") &&
+      value && value.kind === "number";
+
+    if (matches) {
+      if ((value.text === "1" || value.text === "1.") && isTerminator(items, i + 4)) {
+        out.push({ kind: "punct", text: opTok.text, spaceBefore: a.spaceBefore });
+        out.push({ kind: "punct", text: opTok.text, spaceBefore: false });
+        out.push({ kind: "ident", text: a.text, spaceBefore: false });
+        stats.incrementsDecrements++;
+        i += 4;
+        continue;
       }
     }
 
@@ -1520,6 +1566,7 @@ export interface AggressiveOptions {
   reduceConstantVectors: boolean;
   stripTrailingVoidReturn: boolean;
   compoundAssignments: boolean;
+  incrementDecrement: boolean;
   mergeDeclarations: boolean;
   stripRedundantBraces: boolean;
 }
@@ -1532,6 +1579,7 @@ export function allAggressiveOptions(on: boolean): AggressiveOptions {
     reduceConstantVectors: on,
     stripTrailingVoidReturn: on,
     compoundAssignments: on,
+    incrementDecrement: on,
     mergeDeclarations: on,
     stripRedundantBraces: on,
   };
@@ -1643,6 +1691,7 @@ export function golf(source: string, aggressive: boolean | AggressiveOptions = f
   if (options.foldConstants) items = foldConstants(items, aggressiveStats);
   if (options.reduceConstantVectors) items = reduceConstantVectors(items, aggressiveStats);
   if (options.compoundAssignments) items = compoundAssignments(items, aggressiveStats);
+  if (options.incrementDecrement) items = incrementDecrement(items, aggressiveStats);
   if (options.mergeDeclarations) items = mergeDeclarations(items, aggressiveStats);
   if (options.stripRedundantBraces) items = stripRedundantBraces(items, aggressiveStats);
   if (options.stripTrailingVoidReturn) items = stripTrailingVoidReturn(items, aggressiveStats);

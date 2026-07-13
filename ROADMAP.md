@@ -40,6 +40,35 @@ classements), thèmes visuels, et optimisation mobile.
 ## 1. Moteur de golfing (rust-core)
 
 ### 1.1 Nouvelles passes agressives
+- ✅ **FAIT (14/07/2026) — Fusion d'opérateurs : `a+=1;`/`a-=1;` →
+      `++a;`/`--a;`**, 9e passe agressive
+      (`aggressive.rs::increment_decrement`, miroir TS dans
+      `golfer.ts`). Tourne juste après `compound_assignments` dans le
+      pipeline, donc `a=a+1;` (déjà replié en `a+=1;` par cette
+      dernière) en bénéficie aussi — testé explicitement que les deux
+      passes composent (`compound_assignment_single_term_rhs`).
+      **Forme préfixe (`++a`), jamais postfixe, choix délibéré et pas
+      juste stylistique** : une affectation composée est une expression
+      en GLSL (comme en C) qui peut être elle-même lue (`foo(a+=1)`
+      est du GLSL valide) — `a+=1` s'évalue à la *nouvelle* valeur de
+      `a`, exactement ce que fait `++a` par définition, alors que `a++`
+      s'évaluerait à l'ancienne valeur et changerait silencieusement
+      le résultat. Les deux formes font la même taille, donc le choix
+      n'était pas motivé par le gain d'octets mais par la correction —
+      testé explicitement (`increment_decrement_uses_prefix_so_expression_value_stays_correct`).
+      Ne se déclenche que quand le montant est *exactement* `1`/`1.`
+      (comparaison sur le texte déjà raccourci, pas le texte brut —
+      `1.0` devient `1.` avant même que cette passe tourne) ; `1u` /
+      `1.0f` / `1e0` sont hors du scope volontairement étroit (se
+      raccourcissent respectivement en `1u`/`1.f`/inchangé-avec-exposant,
+      jamais en `1`/`1.` exactement). 4 tests Rust dédiés + nouvelle
+      fixture `fixtures/increment_decrement.glsl` (couvre aussi le cas
+      d'usage réel le plus courant, l'en-tête d'un `for` : `i=i+1`
+      dans la clause d'incrément devient `++i`) en parité Rust/TS/wasm
+      (34/34) + checkbox dédiée dans l'UI, vérifiée en headless. Trouvé
+      en passant : la fixture préexistante `struct_safety.glsl`
+      contenait déjà un `+=1`/`-=1` sans le savoir — 2 octets gagnés
+      dessus gratuitement, confirmés identiques Rust/TS/wasm.
 - [ ] Renommage des **swizzles répétés** en variable temporaire si ça
       réduit la taille (`p.xyz` réutilisé → facultatif, à mesurer)
 - [ ] **Inlining de fonctions** appelées une seule fois (une fonction

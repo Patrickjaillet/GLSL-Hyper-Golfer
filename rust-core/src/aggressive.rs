@@ -29,6 +29,7 @@ pub struct AggressiveStats {
     pub dead_stores_removed: usize,
     pub constant_vectors_reduced: usize,
     pub trailing_void_returns_removed: usize,
+    pub increments_decrements: usize,
 }
 
 fn is_unary_prefix(c: char) -> bool {
@@ -712,6 +713,67 @@ pub fn compound_assignments(items: Vec<Item>, stats: &mut AggressiveStats) -> Ve
                         continue;
                     }
                 }
+            }
+        }
+
+        out.push(items[i].clone());
+        i += 1;
+    }
+    out
+}
+
+/// Rewrites `a += 1;` / `a -= 1;` into the prefix form `++a;` / `--a;`,
+/// saving one character. Meant to run right after `compound_assignments`
+/// so `a = a + 1;` (already folded to `a += 1;` by then) benefits too.
+///
+/// Deliberately **prefix**, never postfix: this rewrite also fires when
+/// the compound assignment is itself a sub-expression whose value is
+/// read (`foo(a += 1)`, valid GLSL — assignment is an expression) —
+/// `a += 1` evaluates to the *new* value of `a`, and prefix `++a` is
+/// defined to do exactly the same, whereas postfix `a++` would silently
+/// change the value seen by anything reading the expression's result.
+/// The only cases fired at all are where the increment amount is
+/// *exactly* `1`: matched on `Item::text` (the already-shortened output
+/// form — `1.0` becomes `1.` upstream before this pass ever runs, so
+/// matching on `.text` rather than the untouched `.tok` raw string is
+/// what makes the `"1."` check actually hit), never `1u`/`1.0f`/`1e0`
+/// (those shorten to `1u`/`1.f`/unchanged-with-exponent respectively —
+/// deliberately outside this narrow match rather than special-cased).
+pub fn increment_decrement(items: Vec<Item>, stats: &mut AggressiveStats) -> Vec<Item> {
+    let mut out: Vec<Item> = Vec::with_capacity(items.len());
+    let mut i = 0;
+    while i < items.len() {
+        let op = match (
+            items.get(i).map(|it| &it.tok),
+            items.get(i + 1).map(|it| &it.tok),
+            items.get(i + 2).map(|it| &it.tok),
+            items.get(i + 3).map(|it| &it.tok),
+        ) {
+            (Some(Tok::Ident(_)), Some(Tok::Punct(op @ ('+' | '-'))), Some(Tok::Punct('=')), Some(Tok::Number(_))) => Some(*op),
+            _ => None,
+        };
+
+        if let Some(op) = op {
+            let value_text = items[i + 3].text.as_str();
+            if (value_text == "1" || value_text == "1.") && is_terminator(&items, i + 4) {
+                out.push(Item {
+                    tok: Tok::Punct(op),
+                    text: op.to_string(),
+                    space_before: items[i].space_before,
+                });
+                out.push(Item {
+                    tok: Tok::Punct(op),
+                    text: op.to_string(),
+                    space_before: false,
+                });
+                out.push(Item {
+                    tok: items[i].tok.clone(),
+                    text: items[i].text.clone(),
+                    space_before: false,
+                });
+                stats.increments_decrements += 1;
+                i += 4;
+                continue;
             }
         }
 

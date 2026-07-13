@@ -1,7 +1,7 @@
 use crate::aggressive::{
     compound_assignments, eliminate_dead_locals, eliminate_dead_stores, fold_constants,
-    merge_declarations, reduce_constant_vectors, strip_redundant_braces, strip_trailing_void_return,
-    AggressiveStats, Item,
+    increment_decrement, merge_declarations, reduce_constant_vectors, strip_redundant_braces,
+    strip_trailing_void_return, AggressiveStats, Item,
 };
 use crate::lexer::{tokenize_spaced, Tok};
 use crate::vocab::{
@@ -394,6 +394,7 @@ pub struct AggressiveOptions {
     pub reduce_constant_vectors: bool,
     pub strip_trailing_void_return: bool,
     pub compound_assignments: bool,
+    pub increment_decrement: bool,
     pub merge_declarations: bool,
     pub strip_redundant_braces: bool,
 }
@@ -407,6 +408,7 @@ impl AggressiveOptions {
             reduce_constant_vectors: true,
             strip_trailing_void_return: true,
             compound_assignments: true,
+            increment_decrement: true,
             merge_declarations: true,
             strip_redundant_braces: true,
         }
@@ -420,6 +422,7 @@ impl AggressiveOptions {
             reduce_constant_vectors: false,
             strip_trailing_void_return: false,
             compound_assignments: false,
+            increment_decrement: false,
             merge_declarations: false,
             strip_redundant_braces: false,
         }
@@ -567,6 +570,9 @@ pub fn golf_with_options(source: &str, aggressive: AggressiveOptions) -> GolfRes
     }
     if aggressive.compound_assignments {
         items = compound_assignments(items, &mut aggressive_stats);
+    }
+    if aggressive.increment_decrement {
+        items = increment_decrement(items, &mut aggressive_stats);
     }
     if aggressive.merge_declarations {
         items = merge_declarations(items, &mut aggressive_stats);
@@ -739,9 +745,39 @@ mod tests {
 
     #[test]
     fn compound_assignment_single_term_rhs() {
+        // "x-1.0" folds to "x-=1." (compound_assignments), which then
+        // itself gets picked up by increment_decrement (RHS is exactly
+        // "1.") and rewritten to the even shorter "--x;" — proof the two
+        // passes compose as intended, not just each in isolation.
         let r = golf("x=x-1.0;", true);
-        assert_eq!(r.code, "x-=1.;");
+        assert_eq!(r.code, "--x;");
         assert_eq!(r.stats.aggressive.compound_assignments, 1);
+        assert_eq!(r.stats.aggressive.increments_decrements, 1);
+    }
+
+    #[test]
+    fn increment_decrement_rewrites_compound_assign_by_one() {
+        let r = golf("x+=1.0;y-=1.0;", true);
+        assert_eq!(r.code, "++x;--y;");
+        assert_eq!(r.stats.aggressive.increments_decrements, 2);
+    }
+
+    #[test]
+    fn increment_decrement_refuses_amounts_other_than_one() {
+        let r = golf("x+=2.0;", true);
+        assert_eq!(r.code, "x+=2.;");
+        assert_eq!(r.stats.aggressive.increments_decrements, 0);
+    }
+
+    #[test]
+    fn increment_decrement_uses_prefix_so_expression_value_stays_correct() {
+        // `a += 1` as a sub-expression evaluates to the *new* value of
+        // `a` -- prefix `++a` matches that; postfix `a++` would not, so
+        // this pins that the rewrite is prefix, not postfix, even
+        // though both are the same length.
+        let r = golf("y=(x+=1.0);", true);
+        assert_eq!(r.code, "y=(++x);");
+        assert_eq!(r.stats.aggressive.increments_decrements, 1);
     }
 
     #[test]
@@ -1208,7 +1244,7 @@ mod tests {
         // `IDENT = ...; ...` shaped where a real statement boundary
         // would be — depth-tracking excludes anything inside `(...)`.
         let r = golf("void f(){for(int i=0;i<9;i++){x+=1.0;}}", true);
-        assert_eq!(r.code, "void b(){for(int a=0;a<9;a++)x+=1.;}");
+        assert_eq!(r.code, "void b(){for(int a=0;a<9;a++)++x;}");
         assert_eq!(r.stats.aggressive.dead_stores_removed, 0);
     }
 

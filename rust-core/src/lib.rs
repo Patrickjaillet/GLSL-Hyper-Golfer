@@ -54,6 +54,7 @@ mod wasm_api {
         reduce_constant_vectors: bool,
         strip_trailing_void_return: bool,
         compound_assignments: bool,
+        increment_decrement: bool,
         merge_declarations: bool,
         strip_redundant_braces: bool,
     ) -> String {
@@ -64,6 +65,7 @@ mod wasm_api {
             reduce_constant_vectors,
             strip_trailing_void_return,
             compound_assignments,
+            increment_decrement,
             merge_declarations,
             strip_redundant_braces,
         };
