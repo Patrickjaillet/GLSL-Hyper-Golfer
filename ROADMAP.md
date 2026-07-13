@@ -212,13 +212,76 @@ Shadertoy a besoin de :
 
 ## 3. Éditeur & expérience de code
 
-- [ ] Remplacer le `<textarea>` brut par un vrai éditeur de code
-      (CodeMirror 6 ou Monaco) avec :
-  - [ ] coloration syntaxique GLSL
-  - [ ] auto-complétion des builtins/uniforms
-  - [ ] lint en direct (erreurs de syntaxe soulignées avant même de
-        golfer)
-  - [ ] pliage de blocs, multi-curseur, recherche/remplace
+- ✅ **FAIT (13/07/2026) — Remplacé le `<textarea>` brut par CodeMirror 6**
+      (`web/src/editor.ts`, `web/src/glslLanguage.ts`) :
+  - **CodeMirror 6 plutôt que Monaco** : bundle bien plus léger et
+    modulaire (Monaco embarque son propre worker TypeScript/JSON/CSS
+    inutile ici et pèse significativement plus lourd), s'intègre
+    proprement avec Vite sans configuration spéciale (Monaco demande
+    souvent un plugin Vite dédié pour ses web workers).
+  - [x] **Coloration syntaxique GLSL** — pas de grammaire Lezer complète
+        (aurait été un projet à part entière), un `StreamParser`
+        générique C-like (`@codemirror/legacy-modes`) configuré avec un
+        vocabulaire GLSL ES 3.00/Shadertoy écrit à la main (mots-clés,
+        types, fonctions builtin, `iResolution`/`iTime`/`mainImage`/...).
+        Il existe un mode `shader` intégré dans ce même paquet, mais il
+        est resté figé sur GLSL ES 1.00 (`texture2D`, pas de `uint`/
+        `switch`/`layout`) et ne connaît pas le vocabulaire Shadertoy —
+        écrit le nôtre plutôt que de composer avec ces lacunes.
+        **Dupliqué depuis `rust-core/src/vocab.rs`** (TS qui tourne dans
+        le navigateur ne peut pas interroger le vocabulaire Rust/wasm à
+        l'exécution) — peut dériver sans casser quoi que ce soit
+        fonctionnellement, ça ne change que la coloration, jamais ce qui
+        est renommé/protégé par le vrai moteur.
+  - [x] **Auto-complétion** basique par liste de mots (mots-clés/types/
+        builtins/uniforms Shadertoy) via `@codemirror/autocomplete` —
+        pas d'auto-complétion contextuelle consciente des types/scopes
+        (demanderait la vraie grammaire écartée ci-dessus).
+  - [x] **Pliage de blocs, multi-curseur, recherche/remplace,
+        appariement d'accolades** — tous fournis nativement par
+        CodeMirror 6 (`@codemirror/language`/`@codemirror/search`), pas
+        de travail spécifique à ce projet au-delà du câblage.
+  - [ ] **Lint en direct** (erreurs de syntaxe soulignées avant même de
+        golfer) — **pas fait** : nécessiterait un vrai parseur GLSL (le
+        moteur de golf lui-même est volontairement token-heuristique,
+        pas un parseur complet, donc ne peut pas servir de base à un
+        lint fiable sans un projet séparé).
+  - Thème CodeMirror entièrement personnalisé pour matcher la palette
+    existante (`--ink`/`--paper`/`--cyan`/`--amber`, pas un thème
+    générique importé) — garde l'identité visuelle "banc d'essai" de la
+    section Design plus bas.
+  - Panneau Golfé migré vers une instance CodeMirror **en lecture
+    seule** aussi, par cohérence (coloration syntaxique du résultat
+    golfé, pas seulement du source).
+  - **Coût réel, assumé** : la taille du bundle JS gzippé est passée
+    d'environ 55 Ko à ~146 Ko. Impact direct sur l'item "audit de
+    bundle size" (section 5) et sur la future PWA offline (section 8) —
+    toujours largement acceptable pour une app qui tourne 100%
+    client-side, mais notable.
+  - Vérifié en headless (frappe clavier réelle simulée à travers le
+    vrai pipeline d'entrée CodeMirror, pas juste une valeur posée dans
+    le DOM) : montage CodeMirror confirmé dans les deux panneaux,
+    saisie + golfing fonctionnels, bascule de langue fonctionnelle,
+    placeholder de l'onglet Common toujours correct — zéro erreur
+    console. **Non vérifié visuellement en navigateur réel** (rendu
+    des couleurs de coloration syntaxique, ergonomie du pliage de
+    blocs/multi-curseur) — à confirmer par l'utilisateur.
+- ✅ **FAIT (13/07/2026) — i18n français/anglais** (`web/src/i18n.ts`)
+      — non prévu comme item séparé dans le document d'origine mais
+      explicitement listé comme faisant partie de la killer feature 3
+      en section 9 ("condition d'entrée pour toucher la communauté
+      Shadertoy internationale"). Détection automatique de la langue du
+      navigateur au premier chargement, persistée en `localStorage`,
+      bouton de bascule FR/EN dans l'en-tête. Couverture : tous les
+      libellés/tooltips/placeholders statiques du template (via
+      attributs `data-i18n`/`data-i18n-title` réappliqués au changement
+      de langue) plus tous les messages générés dynamiquement (bandeau
+      d'erreur, prompts/alertes d'import Shadertoy, stats par passe).
+      Les libellés Common/Buffer A-D/Image restent volontairement en
+      anglais dans les deux langues — ce sont les noms propres utilisés
+      par Shadertoy lui-même, les traduire aurait cassé la
+      correspondance avec le vocabulaire que les utilisateurs
+      connaissent déjà.
 - [ ] **Diff visuel** ligne à ligne / token à token entre source et
       golfé (surlignage de ce qui a changé, pas juste avant/après)
 - [ ] Mode **historique/undo** dédié au golfing (annuler juste la
@@ -277,7 +340,9 @@ Shadertoy a besoin de :
   - [ ] lint TS strict (`eslint`) — `tsc -b` est déjà en CI (ci-dessus)
         mais pas de linter dédié
   - [ ] `cargo clippy --deny warnings` en CI
-  - [ ] audit de bundle size (le WASM + JS doivent rester légers)
+  - [ ] audit de bundle size (le WASM + JS doivent rester légers) —
+        d'autant plus pertinent maintenant : CodeMirror (section 3) a
+        fait passer le JS gzippé d'environ 55 Ko à ~146 Ko
   - [ ] `node scripts/wasm-check.mjs` en CI — délibérément pas ajouté
         cette fois : nécessiterait d'installer la cible
         `wasm32-unknown-unknown` + `wasm-pack` dans le job, un coût de
@@ -349,5 +414,15 @@ de golf GLSL, dans l'ordre d'impact probable :
       "ne crashe jamais", pas "produit un résultat sémantiquement
       équivalent" — cette dernière demanderait un vrai évaluateur GLSL,
       un projet à part entière.
-- [ ] 3. **Éditeur pro (Monaco/CodeMirror) + i18n anglais** — condition
-      d'entrée pour toucher la communauté Shadertoy internationale
+- ✅ **FAIT (13/07/2026) — 3. Éditeur pro (CodeMirror 6) + i18n
+      anglais** (section 3) — les 3 killer features de cette section
+      sont maintenant toutes faites. Reste explicitement non fait dans
+      celle-ci : le lint en direct (demanderait un vrai parseur GLSL) et
+      l'audit du coût en taille de bundle qu'elle introduit (~146 Ko
+      gzippé désormais, voir section 5).
+
+**Les 3 killer features de cette section sont faites.** Reste tout le
+reste du document (sections 1, 3 hors éditeur, 4, 6, 7, 8) — la
+suite logique la plus proche des 3 items ci-dessus serait sans doute le
+"diff visuel" (section 3) et le lint en direct, puisqu'ils prolongent
+directement ce qui vient d'être construit.

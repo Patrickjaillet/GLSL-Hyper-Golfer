@@ -10,6 +10,9 @@ import {
   type ChannelWiring,
 } from "./renderer";
 import { initWasmGolfer, wasmGolf } from "./wasmGolfer";
+import { createSourceEditor, createReadOnlyEditor, setEditorContent } from "./editor";
+import { t, getLocale, setLocale, onLocaleChange } from "./i18n";
+import type { EditorView } from "@codemirror/view";
 
 // Prefer the wasm build of the actual Rust engine — same code as the
 // CLI and cargo tests, so no TS/Rust divergence risk — falling back to
@@ -106,15 +109,16 @@ app.innerHTML = `
     <header class="masthead">
       <div class="brand">
         <span class="mark">GLSL⇥</span>
-        <h1 title="tokenizer-based GLSL minifier · WebGL2 live preview">Hyper-Golfing Engine</h1>
+        <h1 data-i18n-title="app.tagline" title="">Hyper-Golfing Engine</h1>
       </div>
       <nav class="tab-bar" id="tab-bar">
-        <button class="tab-btn" data-tab="source" type="button">Source</button>
-        <button class="tab-btn" data-tab="golfed" type="button">Golfé</button>
-        <button class="tab-btn" data-tab="viewport" type="button">Viewport</button>
+        <button class="tab-btn" data-tab="source" type="button" data-i18n="tab.source">Source</button>
+        <button class="tab-btn" data-tab="golfed" type="button" data-i18n="tab.golfed">Golfé</button>
+        <button class="tab-btn" data-tab="viewport" type="button" data-i18n="tab.viewport">Viewport</button>
       </nav>
-      <div class="engine-pill" title="moteur natif : tokenize → renommage → nombres → mise en page">
-        <span class="dot cyan"></span>moteur actif : <b id="engine-label">…</b>
+      <button class="lang-toggle" id="lang-toggle" type="button" data-i18n-title="lang.toggle.title"></button>
+      <div class="engine-pill" data-i18n-title="engine.tooltip" title="">
+        <span class="dot cyan"></span><span data-i18n="engine.activeLabel">moteur actif : </span><b id="engine-label">…</b>
       </div>
     </header>
 
@@ -122,55 +126,52 @@ app.innerHTML = `
       <section class="panel active-tab" id="panel-source" data-panel="source">
         <div class="buffer-tabs" id="buffer-tabs"></div>
         <div class="channel-row" id="channel-row" hidden></div>
-        <div class="editor">
-          <div class="gutter" id="gutter"></div>
-          <textarea id="source" spellcheck="false"></textarea>
-        </div>
+        <div class="editor" id="source-editor-mount"></div>
         <div class="actions">
-          <label class="aggressive-toggle" title="Coche/décoche les 6 passes ci-dessous d'un coup. Chacune reste réglable individuellement — voir ROADMAP.md pour ce que chaque passe fait et ne fait pas.">
+          <label class="aggressive-toggle" data-i18n-title="toggle.aggressive.title" title="">
             <input type="checkbox" id="aggressive-toggle" />
-            Golf agressif
+            <span data-i18n="toggle.aggressive.label">Golf agressif</span>
           </label>
-          <button class="btn ghost small" id="import-btn" type="button" title="Importer un projet multi-buffer depuis une URL Shadertoy (nécessite une clé API Shadertoy gratuite)">⇩ Shadertoy</button>
-          <button class="btn ghost small" id="export-btn" type="button" title="Exporter le projet courant au format JSON Shadertoy">⇧ Export</button>
-          <button class="btn ghost small" id="passes-btn" type="button" aria-haspopup="true" aria-expanded="false" title="Choisir individuellement les passes actives">⚙ Passes</button>
-          <button class="btn ghost" id="reset-btn" type="button">Réinitialiser</button>
-          <button class="btn primary" id="run-btn" type="button">Exécuter le golfing</button>
+          <button class="btn ghost small" id="import-btn" type="button" data-i18n-title="btn.import.title" title="">⇩ Shadertoy</button>
+          <button class="btn ghost small" id="export-btn" type="button" data-i18n-title="btn.export.title" title="">⇧ Export</button>
+          <button class="btn ghost small" id="passes-btn" type="button" aria-haspopup="true" aria-expanded="false" data-i18n-title="btn.passes.title" title="">⚙ Passes</button>
+          <button class="btn ghost" id="reset-btn" type="button" data-i18n="btn.reset">Réinitialiser</button>
+          <button class="btn primary" id="run-btn" type="button" data-i18n="btn.run">Exécuter le golfing</button>
         </div>
       </section>
 
-      <div class="resizer" id="resizer-1" tabindex="0" title="Glisser pour redimensionner (ou ← →)"></div>
+      <div class="resizer" id="resizer-1" tabindex="0" data-i18n-title="buffer.resizer.title" title=""></div>
 
       <section class="panel" id="panel-golfed" data-panel="golfed">
         <div class="panel-head">
-          <div class="panel-title"><span class="dot cyan"></span>Golfé — <span id="golfed-tab-label">Image</span></div>
-          <label class="pretty-toggle" title="Réaffiche le code golfé sur plusieurs lignes indentées pour la lecture, sans changer le résultat réel : ce qui est copié et ce qui tourne dans le viewport reste la version minifiée.">
+          <div class="panel-title"><span class="dot cyan"></span><span data-i18n="panel.golfed.prefix">Golfé — </span><span id="golfed-tab-label">Image</span></div>
+          <label class="pretty-toggle" data-i18n-title="toggle.pretty.title" title="">
             <input type="checkbox" id="pretty-toggle" />
-            Version justifiée
+            <span data-i18n="toggle.pretty.label">Version justifiée</span>
           </label>
-          <button class="btn copy" id="copy-btn" type="button">Copier</button>
+          <button class="btn copy" id="copy-btn" type="button" data-i18n="btn.copy">Copier</button>
         </div>
-        <div class="output-code" id="output"><span class="placeholder">— exécutez le golfing pour voir le résultat —</span></div>
+        <div class="output-code" id="output-editor-mount"></div>
 
         <div class="meter-block">
           <div class="meter-row">
-            <span class="meter-label">Réduction totale</span>
+            <span class="meter-label" data-i18n="meter.label">Réduction totale</span>
             <div class="meter-ticks" id="ticks"></div>
             <span class="meter-value" id="ratio-value">0%</span>
           </div>
           <div class="stat-strip">
-            <span><b id="c-in">0</b> car. source</span>
-            <span><b id="c-out">0</b> car. golfés</span>
-            <span><b id="c-renamed">0</b> identifiants renommés</span>
-            <span><b id="c-numbers">0</b> nombres raccourcis</span>
+            <span><b id="c-in">0</b> <span data-i18n="stat.inputChars">car. source</span></span>
+            <span><b id="c-out">0</b> <span data-i18n="stat.outputChars">car. golfés</span></span>
+            <span><b id="c-renamed">0</b> <span data-i18n="stat.renamed">identifiants renommés</span></span>
+            <span><b id="c-numbers">0</b> <span data-i18n="stat.numbers">nombres raccourcis</span></span>
           </div>
           <div class="stat-strip" id="aggressive-stats" hidden>
-            <span><b id="c-dead">0</b> locaux morts supprimés</span>
-            <span><b id="c-stores">0</b> écritures mortes supprimées</span>
-            <span><b id="c-folded">0</b> constantes repliées</span>
-            <span><b id="c-compound">0</b> affectations composées</span>
-            <span><b id="c-merged">0</b> déclarations fusionnées</span>
-            <span><b id="c-braces">0</b> blocs d'accolades supprimés</span>
+            <span><b id="c-dead">0</b> <span data-i18n="stat.deadLocals">locaux morts supprimés</span></span>
+            <span><b id="c-stores">0</b> <span data-i18n="stat.deadStores">écritures mortes supprimées</span></span>
+            <span><b id="c-folded">0</b> <span data-i18n="stat.folded">constantes repliées</span></span>
+            <span><b id="c-compound">0</b> <span data-i18n="stat.compound">affectations composées</span></span>
+            <span><b id="c-merged">0</b> <span data-i18n="stat.merged">déclarations fusionnées</span></span>
+            <span><b id="c-braces">0</b> <span data-i18n="stat.braces">blocs d'accolades supprimés</span></span>
           </div>
           <div class="stat-strip" id="per-pass-stats"></div>
         </div>
@@ -178,30 +179,30 @@ app.innerHTML = `
         <div class="error-banner" id="error-banner"></div>
       </section>
 
-      <div class="resizer" id="resizer-2" tabindex="0" title="Glisser pour redimensionner (ou ← →)"></div>
+      <div class="resizer" id="resizer-2" tabindex="0" data-i18n-title="buffer.resizer.title" title=""></div>
 
       <div class="viewport-wrap" id="panel-viewport" data-panel="viewport">
         <div class="panel-head">
-          <div class="panel-title"><span class="dot cyan"></span>Viewport temps réel</div>
-          <label class="compare-toggle" title="Rend le shader source (non golfé) et le shader golfé côte-à-côte, pour repérer une différence visuelle silencieuse — le cas le plus dangereux : ça compile, mais le rendu a changé.">
+          <div class="panel-title"><span class="dot cyan"></span><span data-i18n="panel.viewport.title">Viewport temps réel</span></div>
+          <label class="compare-toggle" data-i18n-title="toggle.compare.title" title="">
             <input type="checkbox" id="compare-toggle" />
-            Comparer
+            <span data-i18n="toggle.compare.label">Comparer</span>
           </label>
         </div>
         <div class="viewport-split">
           <div class="viewport-frame" id="frame-source" hidden>
-            <div class="viewport-label">source</div>
+            <div class="viewport-label" data-i18n="viewport.label.source">source</div>
             <canvas id="glcanvas-source"></canvas>
           </div>
           <div class="viewport-frame" id="frame-golfed">
-            <div class="viewport-label" id="label-golfed" hidden>golfé</div>
+            <div class="viewport-label" id="label-golfed" data-i18n="viewport.label.golfed" hidden>golfé</div>
             <canvas id="glcanvas"></canvas>
             <div class="viewport-hud">
               <span class="fps"><b id="fps-value">--</b> fps</span>
               <span id="res-value">--×--</span>
             </div>
             <div class="viewport-controls">
-              <button class="icon-btn" id="pause-btn" type="button" title="Pause / reprendre">⏸</button>
+              <button class="icon-btn" id="pause-btn" type="button" data-i18n-title="pause.title" title="">⏸</button>
             </div>
           </div>
         </div>
@@ -209,33 +210,43 @@ app.innerHTML = `
     </div>
 
     <div class="passes-popover" id="passes-popover" hidden>
-      <label title="Supprime une déclaration locale dont le nom n'apparaît nulle part ailleurs dans le fichier.">
-        <input type="checkbox" id="pass-dead-locals" checked />locaux morts
+      <label data-i18n-title="pass.deadLocals.title" title="">
+        <input type="checkbox" id="pass-dead-locals" checked /><span data-i18n="pass.deadLocals.label">locaux morts</span>
       </label>
-      <label title="Supprime une écriture immédiatement écrasée par la suivante, sans lecture entre les deux (x=1.;x=2.; → x=2.;).">
-        <input type="checkbox" id="pass-dead-stores" checked />écritures mortes
+      <label data-i18n-title="pass.deadStores.title" title="">
+        <input type="checkbox" id="pass-dead-stores" checked /><span data-i18n="pass.deadStores.label">écritures mortes</span>
       </label>
-      <label title="Replie les opérations *, / et % entre littéraux entiers purs (2*3 → 6).">
-        <input type="checkbox" id="pass-fold-constants" checked />constantes
+      <label data-i18n-title="pass.foldConstants.title" title="">
+        <input type="checkbox" id="pass-fold-constants" checked /><span data-i18n="pass.foldConstants.label">constantes</span>
       </label>
-      <label title="Réécrit a=a+b en a+=b quand le membre droit est un terme unique.">
-        <input type="checkbox" id="pass-compound" checked />affectations composées
+      <label data-i18n-title="pass.compound.title" title="">
+        <input type="checkbox" id="pass-compound" checked /><span data-i18n="pass.compound.label">affectations composées</span>
       </label>
-      <label title="Fusionne des déclarations contiguës de même type (float a=1.;float b=2.; → float a=1.,b=2.;).">
-        <input type="checkbox" id="pass-merge" checked />fusion déclarations
+      <label data-i18n-title="pass.merge.title" title="">
+        <input type="checkbox" id="pass-merge" checked /><span data-i18n="pass.merge.label">fusion déclarations</span>
       </label>
-      <label title="Supprime les accolades d'un bloc à instruction unique, protégé contre le dangling-else.">
-        <input type="checkbox" id="pass-braces" checked />accolades
+      <label data-i18n-title="pass.braces.title" title="">
+        <input type="checkbox" id="pass-braces" checked /><span data-i18n="pass.braces.label">accolades</span>
       </label>
     </div>
   </div>
 `;
 
-const source = document.getElementById("source") as HTMLTextAreaElement;
-const gutter = document.getElementById("gutter")!;
+function applyTranslations(): void {
+  document.querySelectorAll<HTMLElement>("[data-i18n]").forEach((el) => {
+    el.textContent = t(el.dataset.i18n!);
+  });
+  document.querySelectorAll<HTMLElement>("[data-i18n-title]").forEach((el) => {
+    el.title = t(el.dataset.i18nTitle!);
+  });
+  langToggle.textContent = getLocale() === "fr" ? "EN" : "FR";
+  renderBufferTabs();
+  renderChannelRow();
+  renderOutput();
+}
+
 const bufferTabsEl = document.getElementById("buffer-tabs")!;
 const channelRowEl = document.getElementById("channel-row") as HTMLElement;
-const output = document.getElementById("output")!;
 const golfedTabLabel = document.getElementById("golfed-tab-label")!;
 const ticks = document.getElementById("ticks")!;
 const ratioValue = document.getElementById("ratio-value")!;
@@ -263,6 +274,7 @@ const passesBtn = document.getElementById("passes-btn") as HTMLButtonElement;
 const passesPopover = document.getElementById("passes-popover") as HTMLElement;
 const importBtn = document.getElementById("import-btn") as HTMLButtonElement;
 const exportBtn = document.getElementById("export-btn") as HTMLButtonElement;
+const langToggle = document.getElementById("lang-toggle") as HTMLButtonElement;
 const engineLabelEl = document.getElementById("engine-label")!;
 const errorBanner = document.getElementById("error-banner")!;
 const runBtn = document.getElementById("run-btn") as HTMLButtonElement;
@@ -286,28 +298,23 @@ const panelSource = document.getElementById("panel-source")!;
 const panelGolfed = document.getElementById("panel-golfed")!;
 const panelViewport = document.getElementById("panel-viewport")!;
 
+langToggle.addEventListener("click", () => setLocale(getLocale() === "fr" ? "en" : "fr"));
+onLocaleChange(applyTranslations);
+
 const TICK_COUNT = 24;
 for (let i = 0; i < TICK_COUNT; i++) {
-  const t = document.createElement("div");
-  t.className = "tick";
-  ticks.appendChild(t);
-}
-
-function syncGutter(): void {
-  const lineCount = source.value.split("\n").length;
-  const rows: string[] = [];
-  for (let i = 1; i <= lineCount; i++) rows.push(`<div>${i}</div>`);
-  gutter.innerHTML = rows.join("");
-  gutter.scrollTop = source.scrollTop;
+  const tick = document.createElement("div");
+  tick.className = "tick";
+  ticks.appendChild(tick);
 }
 
 /**
- * Purely cosmetic re-indentation of already-golfed code for the "Version
- * justifiée" display toggle — breaks the one-liner back onto multiple
- * indented lines after `;`/`{`/`}` so it reads like normal code. Never
- * touches the actual golfed string: what gets compiled and what gets
- * copied always stay the true minified output, this only changes what
- * `output.textContent` shows.
+ * Purely cosmetic re-indentation of already-golfed code for the
+ * "Version justifiée"/"Formatted view" display toggle — breaks the
+ * one-liner back onto multiple indented lines after `;`/`{`/`}` so it
+ * reads like normal code. Never touches the actual golfed string: what
+ * gets compiled and what gets copied always stay the true minified
+ * output, this only changes what the read-only editor shows.
  */
 function prettyPrintGolfed(code: string): string {
   let out = "";
@@ -345,13 +352,17 @@ function prettyPrintGolfed(code: string): string {
     .trim();
 }
 
-source.addEventListener("input", () => {
-  setCurrentCode(source.value);
-  syncGutter();
+// ---------------------------------------------------------------------
+// Editors — CodeMirror 6 (see editor.ts/glslLanguage.ts). One editable
+// instance for whichever buffer tab is selected, one read-only instance
+// showing that tab's golfed output.
+// ---------------------------------------------------------------------
+const sourceEditorMount = document.getElementById("source-editor-mount")!;
+const outputEditorMount = document.getElementById("output-editor-mount")!;
+const sourceEditor: EditorView = createSourceEditor(sourceEditorMount, getPassState(currentTab).code, (doc) => {
+  setCurrentCode(doc);
 });
-source.addEventListener("scroll", () => {
-  gutter.scrollTop = source.scrollTop;
-});
+const outputEditor: EditorView = createReadOnlyEditor(outputEditorMount, t("output.placeholder"));
 
 // ---------------------------------------------------------------------
 // Buffer tabs (Common / Buffer A-D / Image) + per-pass channel wiring.
@@ -367,14 +378,12 @@ function renderChannelRow(): void {
   channelRowEl.hidden = false;
   channelRowEl.innerHTML = state.channels
     .map((ch, i) => {
-      const opts = [`<option value="none"${ch.kind === "none" ? " selected" : ""}>aucune</option>`]
+      const opts = [`<option value="none"${ch.kind === "none" ? " selected" : ""}>${t("channel.none")}</option>`]
         .concat(
-          options
-            .filter((slot) => slot !== currentTab || true) // self-reference (feedback) is allowed
-            .map(
-              (slot) =>
-                `<option value="${slot}"${ch.kind === "buffer" && ch.id === slot ? " selected" : ""}>${BUFFER_LABELS[slot]}</option>`,
-            ),
+          options.map(
+            (slot) =>
+              `<option value="${slot}"${ch.kind === "buffer" && ch.id === slot ? " selected" : ""}>${BUFFER_LABELS[slot]}</option>`,
+          ),
         )
         .join("");
       return `<label>iChannel${i} <select data-channel-index="${i}">${opts}</select></label>`;
@@ -395,12 +404,14 @@ function renderBufferTabs(): void {
     tabs
       .map((id) => {
         const removable = BUFFER_SLOTS.includes(id as BufferSlot);
-        const closeBtn = removable ? `<span class="buffer-tab-close" data-remove="${id}" title="Retirer ce buffer">✕</span>` : "";
+        const closeBtn = removable
+          ? `<span class="buffer-tab-close" data-remove="${id}" title="${t("buffer.remove.title")}">✕</span>`
+          : "";
         return `<button class="buffer-tab-btn${id === currentTab ? " active" : ""}" data-buffer-tab="${id}" type="button">${BUFFER_LABELS[id]}${closeBtn}</button>`;
       })
       .join("") +
     (activeSlots().length < BUFFER_SLOTS.length
-      ? `<button class="buffer-tab-add" id="add-buffer-btn" type="button" title="Ajouter un buffer">+ Buffer</button>`
+      ? `<button class="buffer-tab-add" id="add-buffer-btn" type="button">+ Buffer</button>`
       : "");
 
   bufferTabsEl.querySelectorAll<HTMLButtonElement>("[data-buffer-tab]").forEach((btn) => {
@@ -421,8 +432,7 @@ function renderBufferTabs(): void {
 
 function switchTab(id: BufferId): void {
   currentTab = id;
-  source.value = getPassState(id).code;
-  syncGutter();
+  setEditorContent(sourceEditor, getPassState(id).code);
   renderBufferTabs();
   renderChannelRow();
   golfedTabLabel.textContent = BUFFER_LABELS[id];
@@ -472,7 +482,7 @@ function reportError(err: RenderError | MultiPassError | null): void {
   }
   errorBanner.classList.add("visible");
   const passLabel = "passId" in err ? `${BUFFER_LABELS[err.passId as BufferId]} / ${err.stage}` : err.stage;
-  errorBanner.textContent = `Erreur de compilation (${passLabel}) :\n${err.log}`;
+  errorBanner.textContent = t("error.compileError", { pass: passLabel, log: err.log });
 }
 
 try {
@@ -691,19 +701,18 @@ function syncMasterToggle(): void {
 
 let lastResults: Partial<Record<Exclude<BufferId, "common">, GolfResult>> = {};
 
-/** Renders the currently selected tab's golfed code, reformatted if "Version justifiée" is checked. */
+/** Renders the currently selected tab's golfed code into the read-only editor, reformatted if "Version justifiée" is checked. */
 function renderOutput(): void {
   if (currentTab === "common") {
-    output.innerHTML =
-      '<span class="placeholder">— "Common" est fusionné dans chaque buffer/Image au golfing, il n\'a pas de sortie indépendante —</span>';
+    setEditorContent(outputEditor, t("output.commonPlaceholder"));
     return;
   }
   const result = lastResults[currentTab as Exclude<BufferId, "common">];
   if (!result) {
-    output.innerHTML = '<span class="placeholder">— exécutez le golfing pour voir le résultat —</span>';
+    setEditorContent(outputEditor, t("output.placeholder"));
     return;
   }
-  output.textContent = prettyToggle.checked ? prettyPrintGolfed(result.code) : result.code;
+  setEditorContent(outputEditor, prettyToggle.checked ? prettyPrintGolfed(result.code) : result.code);
 }
 
 function golfProject(): void {
@@ -766,9 +775,7 @@ function golfProject(): void {
     golfedOk = legacyRunner?.load(imageGolfed?.code ?? "") ?? true;
     if (activeSlots().length > 0) {
       errorBanner.classList.add("visible");
-      errorBanner.textContent =
-        (errorBanner.textContent ? errorBanner.textContent + "\n\n" : "") +
-        "WebGL2 indisponible sur ce navigateur : les buffers A-D ne peuvent pas être rendus (repli sur Image seul, tout iChannel qui leur est câblé lit du noir).";
+      errorBanner.textContent = (errorBanner.textContent ? errorBanner.textContent + "\n\n" : "") + t("error.webgl2Unavailable");
     }
   } else {
     golfedOk = mpRunner?.load(golfedPassSources) ?? true;
@@ -776,9 +783,7 @@ function golfProject(): void {
 
   if (!golfedOk && !compatMode.active && mpRunner) {
     const sourceErr = mpRunner.tryCompile(rawPassSources);
-    const note = sourceErr
-      ? "\n\n(Le projet source ne compile pas non plus — le golf n'y est pour rien.)"
-      : "\n\n(Le projet source compile correctement : c'est le golf qui a cassé ce résultat — merci de signaler ce cas.)";
+    const note = sourceErr ? t("error.sourceAlsoBroken") : t("error.golfBrokeIt");
     errorBanner.textContent = (errorBanner.textContent ?? "") + note;
   }
 
@@ -813,7 +818,7 @@ copyBtn.addEventListener("click", async () => {
   try {
     await navigator.clipboard.writeText(result.code);
     const original = copyBtn.textContent;
-    copyBtn.textContent = "Copié !";
+    copyBtn.textContent = t("btn.copy.done");
     setTimeout(() => (copyBtn.textContent = original), 1200);
   } catch {
     /* clipboard permission denied — silently ignore, code is still visible/selectable */
@@ -871,16 +876,16 @@ interface ShadertoyShader {
 }
 
 async function importFromShadertoy(): Promise<void> {
-  const url = window.prompt("URL ou ID Shadertoy (ex: https://www.shadertoy.com/view/XsXXDn) :");
+  const url = window.prompt(t("shadertoy.promptUrl"));
   if (!url) return;
   const id = extractShaderId(url);
   if (!id) {
-    window.alert("ID Shadertoy introuvable dans ce texte.");
+    window.alert(t("shadertoy.idNotFound"));
     return;
   }
   let apiKey = localStorage.getItem("shadertoy-api-key");
   if (!apiKey) {
-    apiKey = window.prompt("Clé API Shadertoy (gratuite — génère la tienne sur shadertoy.com/myapps) :");
+    apiKey = window.prompt(t("shadertoy.promptApiKey"));
     if (!apiKey) return;
     localStorage.setItem("shadertoy-api-key", apiKey);
   }
@@ -888,16 +893,12 @@ async function importFromShadertoy(): Promise<void> {
     const res = await fetch(`https://www.shadertoy.com/api/v1/shaders/${id}?key=${encodeURIComponent(apiKey)}`);
     const data = await res.json();
     if (data.Error) {
-      window.alert("Erreur Shadertoy : " + data.Error);
+      window.alert(t("shadertoy.apiError") + data.Error);
       return;
     }
     applyShadertoyShader(data.Shader as ShadertoyShader);
   } catch (e) {
-    window.alert(
-      "Échec de l'import : " +
-        String(e) +
-        "\n\n(Si le message évoque CORS/réseau : l'API Shadertoy n'autorise peut-être pas les requêtes directes depuis ce site — pas de contournement possible côté navigateur.)",
-    );
+    window.alert(t("shadertoy.importFailed") + String(e) + t("shadertoy.corsNote"));
   }
 }
 
@@ -919,7 +920,7 @@ function applyShadertoyShader(shader: ShadertoyShader): void {
       if (inp.type === "buffer" && outputIdToSlot.has(inp.id)) {
         channels[inp.channel] = { kind: "buffer", id: outputIdToSlot.get(inp.id)! };
       } else {
-        unsupported.push(`${passName} iChannel${inp.channel} : type "${inp.type}" non supporté, mis à "aucune".`);
+        unsupported.push(t("shadertoy.unsupportedChannel", { pass: passName, ch: String(inp.channel), type: inp.type }));
       }
     }
     return channels;
@@ -937,7 +938,7 @@ function applyShadertoyShader(shader: ShadertoyShader): void {
       const slot = pass.outputs[0] ? outputIdToSlot.get(pass.outputs[0].id) : undefined;
       if (slot) newBufferStates[slot] = { code: pass.code, channels: wireChannels(pass.inputs, BUFFER_LABELS[slot]) };
     } else {
-      unsupported.push(`Passe "${pass.name}" de type "${pass.type}" non supportée (son/cubemap), ignorée.`);
+      unsupported.push(t("shadertoy.unsupportedPass", { name: pass.name, type: pass.type }));
     }
   }
 
@@ -948,7 +949,7 @@ function applyShadertoyShader(shader: ShadertoyShader): void {
   golfProject();
 
   if (unsupported.length > 0) {
-    window.alert("Import terminé avec des limitations :\n\n" + unsupported.join("\n"));
+    window.alert(t("shadertoy.importLimitations") + unsupported.join("\n"));
   }
 }
 
@@ -995,10 +996,7 @@ function exportToShadertoy(): void {
 importBtn.addEventListener("click", () => void importFromShadertoy());
 exportBtn.addEventListener("click", exportToShadertoy);
 
-renderBufferTabs();
-renderChannelRow();
-source.value = getPassState(currentTab).code;
-syncGutter();
+applyTranslations();
 setActiveTab("source");
 resizeCanvas();
 syncMasterToggle();

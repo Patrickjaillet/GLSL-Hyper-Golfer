@@ -186,6 +186,25 @@ input {
   font-weight: 500;
 }
 
+.lang-toggle {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--paper-dim);
+  background: transparent;
+  border: 1px solid var(--ink-line);
+  border-radius: var(--radius);
+  padding: 5px 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.lang-toggle:hover {
+  color: var(--cyan);
+  border-color: var(--cyan-dim);
+}
+
 /* ---------------------------------------------------------------------
    Layout grid — 3 columns (source | golfé | viewport) with 2 draggable
    resizer handles between them. The first two columns are user-resized
@@ -393,75 +412,34 @@ input {
 }
 
 /* ---------------------------------------------------------------------
-   Editor (source) — textarea + synced line-number gutter. Fills the
-   remaining height of `.panel` instead of a fixed px height, so it
-   grows/shrinks with whatever room the resizable columns give it;
-   scrolls internally (never the page) when the source is long.
+   Editor (source) / Output — both are CodeMirror 6 mounts (see
+   editor.ts). Each fills the remaining height of `.panel` instead of a
+   fixed px height, so it grows/shrinks with whatever room the
+   resizable columns give it; CodeMirror's own `.cm-scroller` handles
+   internal scrolling (never the page) when the code is long. Line
+   numbers/gutter are CodeMirror's built-in ones now, not a hand-synced
+   `<div>`.
 --------------------------------------------------------------------- */
-.editor {
-  display: grid;
-  grid-template-columns: 36px 1fr;
-  flex: 1;
-  min-height: 0;
-  background: var(--ink);
-  border: 1px solid var(--ink-line);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-
-.gutter {
-  padding: 10px 0;
-  text-align: right;
-  color: #3a4a3a;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.45;
-  user-select: none;
-  overflow: hidden;
-  border-right: 1px solid var(--ink-line);
-  background: #0c0f0b;
-}
-
-.gutter div {
-  padding-right: 8px;
-}
-
-textarea#source {
-  border: 0;
-  resize: none;
-  outline: none;
-  background: transparent;
-  color: var(--paper);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.45;
-  padding: 10px 12px;
-  white-space: pre;
-  overflow: auto;
-}
-
-/* ---------------------------------------------------------------------
-   Output panel
---------------------------------------------------------------------- */
+.editor,
 .output-code {
   flex: 1;
   min-height: 0;
   background: var(--ink);
   border: 1px solid var(--ink-line);
   border-radius: var(--radius);
-  padding: 12px;
-  overflow: auto;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--cyan);
-  white-space: pre-wrap;
-  word-break: break-all;
+  overflow: hidden;
 }
 
-.output-code .placeholder {
-  color: var(--paper-dim);
-  font-style: italic;
+/* Both editors share the same syntax theme now (real highlighting beats
+   a flat color), but a thin cyan edge on the golfed side keeps a trace
+   of the original amber/cyan "two signal traces" identity. */
+.output-code {
+  border-color: var(--cyan-dim);
+}
+
+.editor .cm-editor,
+.output-code .cm-editor {
+  height: 100%;
 }
 
 /* ---------------------------------------------------------------------
