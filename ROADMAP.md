@@ -257,11 +257,21 @@ Shadertoy a besoin de :
       déploiement) avec 3 jobs sur chaque push/PR : `cargo test
       --all-targets` (unitaires + les 3 propriétés fuzz de la section
       1.2), `tsc -b` + `npm run build` côté web, et
-      `scripts/parity-test.mjs` (Rust CLI ↔ port TS). *Non vérifié en
-      conditions réelles* (un push/PR déclenchera le premier run
-      réel — je n'ai pas pu observer un run GitHub Actions de ce
-      nouveau fichier avant de l'écrire, seulement valider sa syntaxe
-      YAML localement).
+      `scripts/parity-test.mjs` (Rust CLI ↔ port TS).
+
+      **Bug réel trouvé dès le premier run** : le job `parity` a échoué
+      — `scripts/parity-test.mjs` et `scripts/wasm-check.mjs`
+      cherchaient tous les deux un binaire nommé en dur `golf.exe`, qui
+      n'existe que sous Windows (`cargo build` ne produit que `golf` sur
+      Linux/macOS). Ce bug existait déjà avant cette session mais
+      n'avait jamais été détecté puisque ces deux scripts n'avaient
+      jusqu'ici tourné que sur ce bac à sable Windows — la CI Linux l'a
+      révélé au premier run réel. Corrigé (choix de l'extension via
+      `process.platform`), reconfirmé vert sur GitHub Actions ensuite
+      (les 3 jobs, y compris `parity`). Un exemple concret de pourquoi
+      "ça marche en local" n'est pas une preuve suffisante — même leçon
+      que le bug swizzle-après-point plus haut, cette fois côté outillage
+      plutôt que moteur.
   - [ ] tests e2e (Playwright) du parcours golf → viewport → copier
   - [ ] tests de non-régression visuelle (screenshot diff du viewport)
   - [ ] lint TS strict (`eslint`) — `tsc -b` est déjà en CI (ci-dessus)
