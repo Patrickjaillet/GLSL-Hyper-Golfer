@@ -536,8 +536,36 @@ Shadertoy a besoin de :
         temps de CI non négligeable pour un troisième niveau de parité
         déjà couvert indirectement par `cargo test` (même code source)
 - [ ] Coverage rapport publié (codecov ou équivalent)
-- [ ] Benchmarks de perf du moteur (`criterion`) suivis dans le temps
-      pour détecter les régressions sur gros shaders
+- ✅ **FAIT (14/07/2026) — Benchmarks de perf du moteur (`criterion`).**
+      Nouveau `rust-core/benches/golf_bench.rs`, `cargo bench` (dev-dep
+      `criterion = "0.5"`, `harness = false`). Deux groupes :
+  - `fixtures/{safe,aggressive}/{fractal,swizzle_after_dot}` — golf
+    safe vs agressif sur les deux plus grosses fixtures réelles
+    existantes.
+  - `synthetic_scaling/aggressive/{10,50,200}` — un shader généré (pas
+    une fixture) avec 10/50/200 petites fonctions contenant chacune un
+    local mort, une écriture morte et un vecteur constant, pour voir
+    comment le temps évolue avec la taille au-delà de ce que les
+    fixtures réelles (qui plafonnent à ~1,1 Ko) peuvent montrer seules.
+    **Observation honnête, pas corrigée cette fois** : le passage de
+    10→50→200 fonctions (×5 puis ×4 la taille) fait passer le temps
+    d'environ 1,8 ms à 8,3 ms à 52 ms (×4,6 puis ×6,3) — légèrement
+    super-linéaire, pas explosif, mais pas strictement linéaire non
+    plus. Pas d'investigation plus poussée ni de correction : ajouter
+    les benchmarks était l'objectif de cet item, pas encore le profilage
+    ni l'optimisation.
+
+      **Non fait** : pas câblé en CI — contrairement aux tests
+      unitaires/parité qui ont un verdict binaire pass/fail évident,
+      un benchmark de perf n'a de sens que comparé à une baseline
+      stockée dans le temps (via un outil comme `critcmp` ou l'action
+      GitHub dédiée), une décision d'infra distincte de "ajouter les
+      benchmarks eux-mêmes". Reste utilisable manuellement en local
+      (`cargo bench`) dès maintenant. Vérifié : compile et tourne
+      proprement (`cargo bench -- --sample-size 10 --measurement-time 1`
+      pour un run rapide de validation), `cargo test` et
+      `cargo clippy --all-targets -- -D warnings` toujours propres avec
+      la nouvelle dev-dependency et la nouvelle cible `[[bench]]`.
 
 ---
 
