@@ -528,6 +528,7 @@ export interface AggressiveStats {
   deadLocalsRemoved: number;
   deadStoresRemoved: number;
   constantVectorsReduced: number;
+  trailingVoidReturnsRemoved: number;
 }
 
 function newAggressiveStats(): AggressiveStats {
@@ -539,6 +540,7 @@ function newAggressiveStats(): AggressiveStats {
     deadLocalsRemoved: 0,
     deadStoresRemoved: 0,
     constantVectorsReduced: 0,
+    trailingVoidReturnsRemoved: 0,
   };
 }
 
@@ -773,6 +775,78 @@ function reduceConstantVectors(items: Token[], stats: AggressiveStats): Token[] 
       out.push(items[closeIdx]);
       stats.constantVectorsReduced++;
       i = closeIdx + 1;
+      continue;
+    }
+    out.push(items[i]);
+    i++;
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Trailing void-return elision — mirrors
+// `rust-core/src/aggressive.rs::strip_trailing_void_return` exactly,
+// including the `if(x)return;` trap guard (see that file's comment for
+// the full reasoning): only strips a bare `return;` that is both (a)
+// immediately preceded by a statement/block boundary (`;`, `{`, `}`, or
+// start of file — never e.g. `)` from an unbraced `if(x)`) and (b)
+// immediately followed by the closing `}` of the `void` function itself.
+// ---------------------------------------------------------------------------
+
+function voidFunctionBodyClosers(items: Token[]): Set<number> {
+  const closers = new Set<number>();
+  let i = 0;
+  while (i < items.length) {
+    const isVoid = items[i]?.kind === "ident" && items[i].text === "void";
+    if (isVoid && items[i + 1]?.kind === "ident" && isPunct(items[i + 2], "(")) {
+      let depth = 0;
+      let k = i + 2;
+      while (k < items.length) {
+        if (isPunct(items[k], "(")) depth++;
+        else if (isPunct(items[k], ")")) {
+          depth--;
+          if (depth === 0) break;
+        }
+        k++;
+      }
+      if (isPunct(items[k + 1], "{")) {
+        let bd = 0;
+        let m = k + 1;
+        while (m < items.length) {
+          if (isPunct(items[m], "{")) bd++;
+          else if (isPunct(items[m], "}")) {
+            bd--;
+            if (bd === 0) {
+              closers.add(m);
+              break;
+            }
+          }
+          m++;
+        }
+        i = m;
+        continue;
+      }
+    }
+    i++;
+  }
+  return closers;
+}
+
+function isStatementBoundary(items: Token[], idx: number): boolean {
+  if (idx === 0) return true;
+  const prev = items[idx - 1];
+  return isPunct(prev, ";") || isPunct(prev, "{") || isPunct(prev, "}");
+}
+
+function stripTrailingVoidReturn(items: Token[], stats: AggressiveStats): Token[] {
+  const closers = voidFunctionBodyClosers(items);
+  const out: Token[] = [];
+  let i = 0;
+  while (i < items.length) {
+    const isReturn = items[i]?.kind === "ident" && items[i].text === "return";
+    if (isReturn && isStatementBoundary(items, i) && isPunct(items[i + 1], ";") && closers.has(i + 2)) {
+      stats.trailingVoidReturnsRemoved++;
+      i += 2;
       continue;
     }
     out.push(items[i]);
@@ -1444,6 +1518,7 @@ export interface AggressiveOptions {
   eliminateDeadStores: boolean;
   foldConstants: boolean;
   reduceConstantVectors: boolean;
+  stripTrailingVoidReturn: boolean;
   compoundAssignments: boolean;
   mergeDeclarations: boolean;
   stripRedundantBraces: boolean;
@@ -1455,6 +1530,7 @@ export function allAggressiveOptions(on: boolean): AggressiveOptions {
     eliminateDeadStores: on,
     foldConstants: on,
     reduceConstantVectors: on,
+    stripTrailingVoidReturn: on,
     compoundAssignments: on,
     mergeDeclarations: on,
     stripRedundantBraces: on,
@@ -1569,6 +1645,7 @@ export function golf(source: string, aggressive: boolean | AggressiveOptions = f
   if (options.compoundAssignments) items = compoundAssignments(items, aggressiveStats);
   if (options.mergeDeclarations) items = mergeDeclarations(items, aggressiveStats);
   if (options.stripRedundantBraces) items = stripRedundantBraces(items, aggressiveStats);
+  if (options.stripTrailingVoidReturn) items = stripTrailingVoidReturn(items, aggressiveStats);
 
   const code = layout(items);
   const outputChars = code.length;

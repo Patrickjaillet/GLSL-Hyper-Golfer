@@ -42,6 +42,7 @@ export function wasmGolf(source: string, aggressive: boolean | AggressiveOptions
           aggressive.eliminateDeadStores,
           aggressive.foldConstants,
           aggressive.reduceConstantVectors,
+          aggressive.stripTrailingVoidReturn,
           aggressive.compoundAssignments,
           aggressive.mergeDeclarations,
           aggressive.stripRedundantBraces,

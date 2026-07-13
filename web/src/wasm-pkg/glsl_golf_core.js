@@ -52,18 +52,19 @@ export function golf_json(source, aggressive) {
  * @param {boolean} eliminate_dead_stores
  * @param {boolean} fold_constants
  * @param {boolean} reduce_constant_vectors
+ * @param {boolean} strip_trailing_void_return
  * @param {boolean} compound_assignments
  * @param {boolean} merge_declarations
  * @param {boolean} strip_redundant_braces
  * @returns {string}
  */
-export function golf_json_ex(source, eliminate_dead_locals, eliminate_dead_stores, fold_constants, reduce_constant_vectors, compound_assignments, merge_declarations, strip_redundant_braces) {
+export function golf_json_ex(source, eliminate_dead_locals, eliminate_dead_stores, fold_constants, reduce_constant_vectors, strip_trailing_void_return, compound_assignments, merge_declarations, strip_redundant_braces) {
     let deferred2_0;
     let deferred2_1;
     try {
         const ptr0 = passStringToWasm0(source, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.golf_json_ex(ptr0, len0, eliminate_dead_locals, eliminate_dead_stores, fold_constants, reduce_constant_vectors, compound_assignments, merge_declarations, strip_redundant_braces);
+        const ret = wasm.golf_json_ex(ptr0, len0, eliminate_dead_locals, eliminate_dead_stores, fold_constants, reduce_constant_vectors, strip_trailing_void_return, compound_assignments, merge_declarations, strip_redundant_braces);
         deferred2_0 = ret[0];
         deferred2_1 = ret[1];
         return getStringFromWasm0(ret[0], ret[1]);

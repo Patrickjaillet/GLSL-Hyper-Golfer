@@ -28,6 +28,7 @@ pub struct AggressiveStats {
     pub dead_locals_removed: usize,
     pub dead_stores_removed: usize,
     pub constant_vectors_reduced: usize,
+    pub trailing_void_returns_removed: usize,
 }
 
 fn is_unary_prefix(c: char) -> bool {
@@ -529,6 +530,106 @@ pub fn reduce_constant_vectors(items: Vec<Item>, stats: &mut AggressiveStats) ->
             out.push(items[close_idx].clone());
             stats.constant_vectors_reduced += 1;
             i = close_idx + 1;
+            continue;
+        }
+        out.push(items[i].clone());
+        i += 1;
+    }
+    out
+}
+
+// ---------------------------------------------------------------------
+// Trailing void-return elision — `void f(){ ...; return; }` ->
+// `void f(){ ...; }`. Falling off the end of a `void` function is
+// spec-equivalent to an explicit bare `return;`, so a `return;` that is
+// genuinely the function body's own final statement can always be
+// dropped.
+//
+// The trap this has to avoid: `if(x)return;}` (an *unbraced* `if`
+// clause whose single-statement body happens to be the function's last
+// statement) looks token-wise identical to a real standalone `return;`
+// right before the closing `}` — but `if` syntactically requires some
+// statement to follow it, so blindly deleting `return;` here would
+// leave `if(x)}`, invalid GLSL. Guarded against by requiring `return`
+// itself to be immediately preceded by a statement/block boundary
+// (`;`, `{`, `}`, or the start of the token stream) — the same
+// boundary convention `eliminate_dead_locals`/`eliminate_dead_stores`
+// use — which `if(x)return;` fails (preceded by `)`), so it's correctly
+// left alone.
+// ---------------------------------------------------------------------
+
+/// Token indices of every `}` that closes a top-level `void <name>(...) { ... }` function body.
+fn void_function_body_closers(items: &[Item]) -> std::collections::HashSet<usize> {
+    let mut closers = std::collections::HashSet::new();
+    let mut i = 0;
+    while i < items.len() {
+        let is_void = matches!(&items[i].tok, Tok::Ident(s) if s == "void");
+        if is_void && matches!(items.get(i + 1).map(|it| &it.tok), Some(Tok::Ident(_))) {
+            if let Some(Tok::Punct('(')) = items.get(i + 2).map(|it| &it.tok) {
+                let mut depth = 0i32;
+                let mut k = i + 2;
+                loop {
+                    match items.get(k).map(|it| &it.tok) {
+                        Some(Tok::Punct('(')) => depth += 1,
+                        Some(Tok::Punct(')')) => {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                        }
+                        None => break,
+                        _ => {}
+                    }
+                    k += 1;
+                }
+                if matches!(items.get(k + 1).map(|it| &it.tok), Some(Tok::Punct('{'))) {
+                    let mut bd = 0i32;
+                    let mut m = k + 1;
+                    loop {
+                        match items.get(m).map(|it| &it.tok) {
+                            Some(Tok::Punct('{')) => bd += 1,
+                            Some(Tok::Punct('}')) => {
+                                bd -= 1;
+                                if bd == 0 {
+                                    closers.insert(m);
+                                    break;
+                                }
+                            }
+                            None => break,
+                            _ => {}
+                        }
+                        m += 1;
+                    }
+                    i = m;
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+    closers
+}
+
+fn is_statement_boundary(items: &[Item], idx: usize) -> bool {
+    if idx == 0 {
+        return true;
+    }
+    matches!(items.get(idx - 1).map(|it| &it.tok), Some(Tok::Punct(';')) | Some(Tok::Punct('{')) | Some(Tok::Punct('}')))
+}
+
+pub fn strip_trailing_void_return(items: Vec<Item>, stats: &mut AggressiveStats) -> Vec<Item> {
+    let closers = void_function_body_closers(&items);
+    let mut out: Vec<Item> = Vec::with_capacity(items.len());
+    let mut i = 0;
+    while i < items.len() {
+        let is_return = matches!(&items[i].tok, Tok::Ident(s) if s == "return");
+        if is_return
+            && is_statement_boundary(&items, i)
+            && matches!(items.get(i + 1).map(|it| &it.tok), Some(Tok::Punct(';')))
+            && closers.contains(&(i + 2))
+        {
+            stats.trailing_void_returns_removed += 1;
+            i += 2;
             continue;
         }
         out.push(items[i].clone());

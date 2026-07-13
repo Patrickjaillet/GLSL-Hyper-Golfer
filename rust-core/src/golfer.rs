@@ -1,6 +1,7 @@
 use crate::aggressive::{
     compound_assignments, eliminate_dead_locals, eliminate_dead_stores, fold_constants,
-    merge_declarations, reduce_constant_vectors, strip_redundant_braces, AggressiveStats, Item,
+    merge_declarations, reduce_constant_vectors, strip_redundant_braces, strip_trailing_void_return,
+    AggressiveStats, Item,
 };
 use crate::lexer::{tokenize_spaced, Tok};
 use crate::vocab::{
@@ -391,6 +392,7 @@ pub struct AggressiveOptions {
     pub eliminate_dead_stores: bool,
     pub fold_constants: bool,
     pub reduce_constant_vectors: bool,
+    pub strip_trailing_void_return: bool,
     pub compound_assignments: bool,
     pub merge_declarations: bool,
     pub strip_redundant_braces: bool,
@@ -403,6 +405,7 @@ impl AggressiveOptions {
             eliminate_dead_stores: true,
             fold_constants: true,
             reduce_constant_vectors: true,
+            strip_trailing_void_return: true,
             compound_assignments: true,
             merge_declarations: true,
             strip_redundant_braces: true,
@@ -415,6 +418,7 @@ impl AggressiveOptions {
             eliminate_dead_stores: false,
             fold_constants: false,
             reduce_constant_vectors: false,
+            strip_trailing_void_return: false,
             compound_assignments: false,
             merge_declarations: false,
             strip_redundant_braces: false,
@@ -569,6 +573,9 @@ pub fn golf_with_options(source: &str, aggressive: AggressiveOptions) -> GolfRes
     }
     if aggressive.strip_redundant_braces {
         items = strip_redundant_braces(items, &mut aggressive_stats);
+    }
+    if aggressive.strip_trailing_void_return {
+        items = strip_trailing_void_return(items, &mut aggressive_stats);
     }
 
     let code = layout(&items);
@@ -958,6 +965,61 @@ mod tests {
         assert_eq!(r.code, "void a(){vec3 b=vec3(6);}");
         assert_eq!(r.stats.aggressive.constants_folded, 3);
         assert_eq!(r.stats.aggressive.constant_vectors_reduced, 1);
+    }
+
+    #[test]
+    fn strips_a_trailing_bare_return_in_a_void_function() {
+        let r = golf("void f(){foo();return;}", true);
+        assert_eq!(r.code, "void a(){foo();}");
+        assert_eq!(r.stats.aggressive.trailing_void_returns_removed, 1);
+    }
+
+    #[test]
+    fn strips_a_solitary_trailing_return() {
+        let r = golf("void f(){return;}", true);
+        assert_eq!(r.code, "void a(){}");
+        assert_eq!(r.stats.aggressive.trailing_void_returns_removed, 1);
+    }
+
+    #[test]
+    fn refuses_an_unbraced_if_bodied_trailing_return() {
+        // The trap: `if(x)return;` looks token-wise identical to a real
+        // standalone `return;` right before the closing `}`, but `if`
+        // syntactically requires a statement to follow it — deleting
+        // `return;` here would leave `if(x)}`, invalid GLSL. Caught by
+        // requiring `return` to be immediately preceded by a statement
+        // boundary (`;`/`{`/`}`), which `)` (from `if(x)`) is not.
+        let r = golf("void f(){if(x)return;}", true);
+        assert_eq!(r.code, "void a(){if(x)return;}");
+        assert_eq!(r.stats.aggressive.trailing_void_returns_removed, 0);
+    }
+
+    #[test]
+    fn refuses_the_same_trap_even_after_brace_stripping_exposes_it() {
+        // `strip_redundant_braces` turns `if(x){return;}` into
+        // `if(x)return;` earlier in the pipeline — the trailing-return
+        // pass must still decline afterward, exactly as it would have
+        // declined the already-unbraced form directly above.
+        let r = golf("void f(){if(x){return;}}", true);
+        assert_eq!(r.code, "void a(){if(x)return;}");
+        assert_eq!(r.stats.aggressive.braces_removed, 1);
+        assert_eq!(r.stats.aggressive.trailing_void_returns_removed, 0);
+    }
+
+    #[test]
+    fn refuses_a_return_not_immediately_before_the_functions_own_close() {
+        let r = golf("void f(){if(x)return;else bar();}", true);
+        assert_eq!(r.code, "void a(){if(x)return;else bar();}");
+        assert_eq!(r.stats.aggressive.trailing_void_returns_removed, 0);
+    }
+
+    #[test]
+    fn refuses_a_return_carrying_a_value() {
+        // Not a *bare* `return;` — `return` isn't immediately followed
+        // by `;`, so this never matches regardless of function type.
+        let r = golf("float f(){return 1.0;}", true);
+        assert_eq!(r.code, "float a(){return 1.;}");
+        assert_eq!(r.stats.aggressive.trailing_void_returns_removed, 0);
     }
 
     #[test]

@@ -24,7 +24,7 @@ const fr: Dict = {
   "panel.viewport.title": "Viewport temps réel",
   "toggle.aggressive.label": "Golf agressif",
   "toggle.aggressive.title":
-    "Coche/décoche les 7 passes ci-dessous d'un coup. Chacune reste réglable individuellement — voir ROADMAP.md pour ce que chaque passe fait et ne fait pas.",
+    "Coche/décoche les 8 passes ci-dessous d'un coup. Chacune reste réglable individuellement — voir ROADMAP.md pour ce que chaque passe fait et ne fait pas.",
   "btn.import.title": "Importer un projet multi-buffer depuis une URL Shadertoy (nécessite une clé API Shadertoy gratuite)",
   "btn.export.title": "Exporter le projet courant au format JSON Shadertoy",
   "btn.passes.title": "Choisir individuellement les passes actives",
@@ -53,6 +53,7 @@ const fr: Dict = {
   "stat.compound": "affectations composées",
   "stat.merged": "déclarations fusionnées",
   "stat.braces": "blocs d'accolades supprimés",
+  "stat.trailingReturn": "return finaux supprimés",
   "toggle.compare.label": "Comparer",
   "toggle.compare.title":
     "Rend le shader source (non golfé) et le shader golfé côte-à-côte, pour repérer une différence visuelle silencieuse — le cas le plus dangereux : ça compile, mais le rendu a changé.",
@@ -75,6 +76,9 @@ const fr: Dict = {
   "pass.merge.title": "Fusionne des déclarations contiguës de même type (float a=1.;float b=2.; → float a=1.,b=2.;).",
   "pass.braces.label": "accolades",
   "pass.braces.title": "Supprime les accolades d'un bloc à instruction unique, protégé contre le dangling-else.",
+  "pass.trailingReturn.label": "return finaux",
+  "pass.trailingReturn.title":
+    "Supprime un `return;` sans valeur quand c'est la toute dernière instruction d'une fonction void — équivalent à tomber en fin de fonction. Protégé contre le cas piège `if(x)return;` (corps non accolé d'un if).",
   "channel.none": "aucune",
   "buffer.remove.title": "Retirer ce buffer",
   "buffer.resizer.title": "Glisser pour redimensionner (ou ← →)",
@@ -110,7 +114,7 @@ const en: Dict = {
   "panel.viewport.title": "Live viewport",
   "toggle.aggressive.label": "Aggressive golf",
   "toggle.aggressive.title":
-    "Checks/unchecks all 7 passes below at once. Each stays individually toggleable — see ROADMAP.md for exactly what each pass does and doesn't do.",
+    "Checks/unchecks all 8 passes below at once. Each stays individually toggleable — see ROADMAP.md for exactly what each pass does and doesn't do.",
   "btn.import.title": "Import a multi-buffer project from a Shadertoy URL (needs a free Shadertoy API key)",
   "btn.export.title": "Export the current project as Shadertoy JSON",
   "btn.passes.title": "Choose which passes are active individually",
@@ -139,6 +143,7 @@ const en: Dict = {
   "stat.compound": "compound assignments",
   "stat.merged": "declarations merged",
   "stat.braces": "brace blocks removed",
+  "stat.trailingReturn": "trailing returns removed",
   "toggle.compare.label": "Compare",
   "toggle.compare.title":
     "Renders the source (un-golfed) and golfed shaders side by side, to catch a silent visual difference — the most dangerous case: it compiles, but the render changed.",
@@ -161,6 +166,9 @@ const en: Dict = {
   "pass.merge.title": "Merges adjacent same-type declarations (float a=1.;float b=2.; → float a=1.,b=2.;).",
   "pass.braces.label": "braces",
   "pass.braces.title": "Strips braces off a single-statement block, guarded against dangling-else.",
+  "pass.trailingReturn.label": "trailing returns",
+  "pass.trailingReturn.title":
+    "Removes a valueless `return;` when it's the very last statement of a void function — equivalent to falling off the end. Guarded against the `if(x)return;` trap (an unbraced if's own body).",
   "channel.none": "none",
   "buffer.remove.title": "Remove this buffer",
   "buffer.resizer.title": "Drag to resize (or ← →)",

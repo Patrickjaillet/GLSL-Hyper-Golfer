@@ -50,7 +50,30 @@ classements), thèmes visuels, et optimisation mobile.
 - [ ] Fusion d'opérateurs : `x=x+1.` → `++x`/`x++` quand plus court
 - [ ] Réécriture `a?b:c` à partir de `if/else` quand plus court
 - [ ] Détection et fusion de `for`/`while` équivalents plus courts
-- [ ] Suppression de `return;` final implicite en fin de fonction `void`
+- ✅ **FAIT (14/07/2026) — Suppression de `return;` final en fin de
+      fonction `void`**, 8e passe agressive
+      (`aggressive.rs::strip_trailing_void_return`, miroir TS). Sûr par
+      la spec : tomber en fin de fonction `void` équivaut à un
+      `return;` explicite. **Piège identifié et corrigé avant même
+      d'écrire le code** : `if(x)return;` (corps non accolé d'un `if`,
+      lui-même dernière instruction de la fonction) ressemble token par
+      token à un vrai `return;` autonome juste avant le `}` final, mais
+      `if` exige syntaxiquement une instruction à sa suite — supprimer
+      le `return;` laisserait `if(x)}`, GLSL invalide. Protégé en
+      exigeant que `return` soit lui-même précédé d'une frontière
+      d'instruction (`;`, `{`, `}`, ou début de fichier — même
+      convention que `eliminate_dead_locals`/`eliminate_dead_stores`),
+      que `if(x)return;` échoue (précédé de `)`). Vérifié que le piège
+      résiste même quand `strip_redundant_braces` tourne avant et
+      transforme `if(x){return;}` en `if(x)return;` — toujours refusé,
+      testé explicitement. 6 tests Rust dédiés (suppression simple,
+      fonction à un seul `return;`, refus du piège `if` non accolé,
+      refus du même piège après dépouillement d'accolades, refus
+      quand une autre instruction suit, refus sur `return` avec
+      valeur/fonction non-void) + `fixtures/trailing_void_return.glsl`
+      en parité Rust/TS/wasm (32/32) + checkbox dédiée, vérifiée en
+      headless (le `if(x)return;` protégé reste intact activé ou non,
+      seul le vrai `return;` final est retiré, zéro erreur console).
 - ✅ **FAIT (13/07/2026) — Réduction des vecteurs constants**
       (`vec3(1.,1.,1.)` → `vec3(1.)`), 7e passe agressive
       (`aggressive.rs::reduce_constant_vectors`, miroir TS dans
