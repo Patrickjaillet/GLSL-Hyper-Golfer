@@ -781,6 +781,26 @@ mod tests {
     }
 
     #[test]
+    fn increment_decrement_never_collides_with_a_preceding_operator() {
+        // Regression guard for a trap considered while adding this pass:
+        // emitting a synthetic "++"/"--" right after another "+"/"-"
+        // with no separator would risk real GLSL compilers re-lexing
+        // three-in-a-row as e.g. "++"+"+" (maximal munch) instead of
+        // "+"+"++" -- a classic C-family gotcha. It can't actually
+        // happen here: `x+=1` only ever matches when `x` is a bare
+        // lvalue (GLSL grammar requires it), so the token immediately
+        // before `x` can never itself be a bare `+`/`-` with no
+        // separator -- that would make `x` part of a non-lvalue
+        // expression, which wouldn't have compiled as `+=`'s target in
+        // the first place. Chained assignment (the one case where
+        // another operator, `=`, does sit directly before the rewrite)
+        // is exercised here to confirm no space corruption either way.
+        let r = golf("y=x+=1.0;", true);
+        assert_eq!(r.code, "y=++x;");
+        assert_eq!(r.stats.aggressive.increments_decrements, 1);
+    }
+
+    #[test]
     fn compound_assignment_refuses_unsafe_chain() {
         // a -= (b - c) != a - b - c, so a longer +/- chain on the RHS
         // must never be folded into a compound assignment.

@@ -134,8 +134,34 @@ classements), thèmes visuels, et optimisation mobile.
 - [ ] Détection de code mort **inter-instructions non adjacentes**
       (actuellement limité aux paires strictement adjacentes, documenté
       comme limite connue dans les tests)
-- [ ] Passe de **canonicalisation des espaces autour des opérateurs**
-      unaires ambigus (`- -1.` vs `--1.`) avec tests de non-régression
+- 🟡 **PARTIEL (14/07/2026) — Canonicalisation des espaces autour des
+      opérateurs unaires ambigus.** Pas une nouvelle passe séparée : le
+      mécanisme existe déjà dans `layout()` (`forms_ambiguous_pair` +
+      `Item::space_before`, présent avant cette session) et fonctionne
+      correctement pour tout token qui vient tel quel de la source —
+      c'est ce qui garantit que `- -1.` (négation double, espace
+      présente dans la source) ne devient jamais `--1.` (decrement,
+      GLSL différent) au ré-assemblage. Ce qui **a été fait ici** :
+      analyse explicite du risque inverse en ajoutant la 9e passe
+      agressive ci-dessus (`increment_decrement`, qui *synthétise* des
+      tokens `+`/`+` ou `-`/`-` adjacents plutôt que de les recopier
+      depuis la source) — un token `++`/`--` fraîchement créé pourrait
+      en théorie coller à un `+`/`-` déjà présent juste avant
+      (`+` + `++` → un vrai compilateur C-like relirait `+++` comme
+      `++` puis `+`, pas `+` puis `++`, par maximal munch). Prouvé que
+      ce cas est **inatteignable** : `x+=1` ne matche que quand `x` est
+      une lvalue nue (exigence de grammaire GLSL), donc le token juste
+      avant `x` ne peut jamais être lui-même un `+`/`-` collé sans
+      séparateur — ça ferait de `x` une sous-expression non-lvalue,
+      qui n'aurait pas compilé comme cible de `+=` en premier lieu.
+      Verrouillé par un test de régression dédié
+      (`increment_decrement_never_collides_with_a_preceding_operator`)
+      plutôt que laissé comme raisonnement informel. **Reste non fait**
+      : une passe de canonicalisation générale et indépendante (utile
+      si une future passe agressive venait, elle, à synthétiser des
+      tokens adjacents à un endroit où cette preuve par grammaire ne
+      s'applique pas) — pas de besoin identifié pour l'instant, donc
+      pas construite avant d'avoir un vrai cas d'usage.
 - [ ] Rapport "diff sémantique" formel : preuve que chaque passe
       préserve l'AST-équivalence (pas juste des tests golden)
 
