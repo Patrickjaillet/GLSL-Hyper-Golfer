@@ -76,7 +76,6 @@ classements), thèmes visuels, et optimisation mobile.
 - [ ] **Extraction de sous-expressions communes** (CSE) quand ça réduit
       la taille nette (attention : golfing veut souvent l'inverse —
       dupliquer est parfois plus court que déclarer une variable)
-- [ ] Fusion d'opérateurs : `x=x+1.` → `++x`/`x++` quand plus court
 - [ ] Réécriture `a?b:c` à partir de `if/else` quand plus court
 - [ ] Détection et fusion de `for`/`while` équivalents plus courts
 - ✅ **FAIT (14/07/2026) — Suppression de `return;` final en fin de
