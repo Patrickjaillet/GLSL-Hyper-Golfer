@@ -288,8 +288,48 @@ classements), thèmes visuels, et optimisation mobile.
       détection général.
 
 ### 1.3 Config / API du moteur
-- [ ] Exposer un **niveau de golf réglable** (safe / balanced /
-      aggressive / max-risk) plutôt que la simple checkbox actuelle
+- ✅ **FAIT, en partie (14/07/2026) — Niveau de golf réglable.**
+      Remplacé le seul bouton-case à cocher "Golf agressif" par un
+      menu déroulant `<select>` à 3 niveaux (Sûr / Équilibré /
+      Agressif), qui applique un préréglage aux 10 cases à cocher
+      existantes plutôt que de les remplacer — le popover "⚙ Passes"
+      reste utilisable pour un réglage fin, comme avant. **Pas de 4e
+      niveau "max-risk"**, contrairement à ce que demandait l'item
+      d'origine : décision délibérée, pas un oubli. Chaque passe
+      agressive implémentée est sûre *par construction* (voir chaque
+      entrée de la section 1.1) — il n'existe aujourd'hui aucune passe
+      réellement plus "risquée" qu'une autre à répartir dans un 4e
+      palier ; en fabriquer un artificiellement aurait suggéré une
+      hiérarchie de danger qui n'existe pas. Un vrai "max-risk"
+      (CSE, inlining) attendrait que ces passes existent — et elles
+      ont justement été mises de côté cette session précisément parce
+      qu'elles demanderaient une vraie analyse de flux de données pour
+      être sûres, pas juste un badge "risqué" sur une passe déjà
+      construite prudemment (voir section 1.1).
+  - **Split Sûr / Équilibré / Agressif** : "Équilibré" regroupe les
+    passes qui ne font jamais que réduire la taille sans changer la
+    *forme* visible du code (suppression de code mort, repliement de
+    constantes, réécriture d'affectations composées/incréments) ;
+    "Agressif" ajoute les passes qui restructurent aussi la forme
+    syntaxique (if/else → ternaire, suppression d'accolades, fusion de
+    déclarations, suppression de return final) — toujours prouvées
+    correctes, juste un diff visuel plus important par rapport à la
+    source.
+  - **Synchronisation bidirectionnelle** : sélectionner un niveau
+    coche/décoche les cases correspondantes ; décocher une case
+    manuellement fait basculer le menu sur une option "Personnalisé"
+    cachée (présente dans le DOM, jamais choisissable directement dans
+    la liste déroulante — l'équivalent pour un `<select>` de l'ancien
+    état `.indeterminate` de la case à cocher maître qu'il remplace).
+  - Vérifié en headless (script jetable, supprimé après usage) : niveau
+    par défaut "Agressif" (cohérent avec l'ancien comportement où
+    toutes les cases étaient cochées par défaut), "Sûr" décoche tout,
+    "Équilibré" coche exactement le bon sous-ensemble (vérifié
+    explicitement qu'il exclut les passes de forme comme les ternaires
+    et les accolades), décocher une case sous "Agressif" bascule bien
+    sur "Personnalisé", la recocher revient bien sur "Agressif" — 6/6.
+    Plus la suite standard (tsc, eslint, build, e2e, mis à jour pour
+    piloter le nouveau menu au lieu de l'ancienne case à cocher).
 - ✅ **FAIT (14/07/2026) — API acceptant une whitelist de noms à ne
       jamais renommer.** Nouvelle fonction
       `golfer::golf_with_protected_names(source, aggressive_options,

@@ -455,7 +455,7 @@ input {
   flex-shrink: 0;
 }
 
-.aggressive-toggle {
+.golf-level-field {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -464,18 +464,26 @@ input {
   letter-spacing: 0.03em;
   text-transform: uppercase;
   color: var(--paper-dim);
-  cursor: pointer;
+  cursor: default;
   user-select: none;
   margin-right: auto;
   white-space: nowrap;
 }
 
-.aggressive-toggle:hover {
+.golf-level-field:hover {
   color: var(--paper);
 }
 
-.aggressive-toggle input {
-  accent-color: var(--cyan);
+.golf-level-field select {
+  background: var(--ink);
+  color: var(--paper);
+  border: 1px solid var(--ink-line);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: normal;
+  padding: 2px 4px;
   cursor: pointer;
 }
 

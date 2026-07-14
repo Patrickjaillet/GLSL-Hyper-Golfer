@@ -228,9 +228,14 @@ app.innerHTML = `
         <div class="channel-row" id="channel-row" hidden></div>
         <div class="editor" id="source-editor-mount"></div>
         <div class="actions">
-          <label class="aggressive-toggle" data-i18n-title="toggle.aggressive.title" title="">
-            <input type="checkbox" id="aggressive-toggle" />
-            <span data-i18n="toggle.aggressive.label">Golf agressif</span>
+          <label class="golf-level-field" data-i18n-title="golfLevel.title" title="">
+            <span data-i18n="golfLevel.label">Niveau</span>
+            <select id="golf-level-select">
+              <option value="safe" data-i18n="golfLevel.safe">Sûr</option>
+              <option value="balanced" data-i18n="golfLevel.balanced">Équilibré</option>
+              <option value="aggressive" data-i18n="golfLevel.aggressive">Agressif</option>
+              <option value="custom" data-i18n="golfLevel.custom" hidden>Personnalisé</option>
+            </select>
           </label>
           <button class="btn ghost small" id="import-btn" type="button" data-i18n-title="btn.import.title" title="">⇩ Shadertoy</button>
           <button class="btn ghost small" id="export-btn" type="button" data-i18n-title="btn.export.title" title="">⇧ Export</button>
@@ -402,7 +407,7 @@ const cBraces = document.getElementById("c-braces")!;
 const cTrailingReturn = document.getElementById("c-trailing-return")!;
 const cMerged = document.getElementById("c-merged")!;
 const perPassStats = document.getElementById("per-pass-stats")!;
-const aggressiveToggle = document.getElementById("aggressive-toggle") as HTMLInputElement;
+const golfLevelSelect = document.getElementById("golf-level-select") as HTMLSelectElement;
 const passDeadLocals = document.getElementById("pass-dead-locals") as HTMLInputElement;
 const passDeadStores = document.getElementById("pass-dead-stores") as HTMLInputElement;
 const passFoldConstants = document.getElementById("pass-fold-constants") as HTMLInputElement;
@@ -425,6 +430,27 @@ const passCheckboxes = [
   passBraces,
   passTrailingReturn,
 ];
+
+type GolfLevel = "safe" | "balanced" | "aggressive";
+
+// "Balanced" is every pass that only ever shrinks text without
+// changing the code's visible *shape* — dead code removal, constant
+// folding, compound-assignment/increment rewriting. "Aggressive" adds
+// the passes that also restructure control flow syntactically
+// (if/else -> ternary, brace stripping, declaration merging, trailing
+// return removal) — still provably correct (see ROADMAP.md for each
+// pass's safety argument), just a bigger visual diff from the source.
+// There's deliberately no fourth "max-risk" tier: every implemented
+// aggressive pass is safe-by-construction, not heuristic-risky: a few
+// were considered and *not* built this way (CSE, function inlining)
+// specifically because they couldn't meet that bar without real
+// data-flow analysis — see ROADMAP.md section 1.1.
+const GOLF_LEVEL_PASSES: Record<GolfLevel, HTMLInputElement[]> = {
+  safe: [],
+  balanced: [passDeadLocals, passDeadStores, passFoldConstants, passConstantVectors, passCompound, passIncDec],
+  aggressive: passCheckboxes,
+};
+
 const protectedNamesInput = document.getElementById("protected-names-input") as HTMLInputElement;
 protectedNamesInput.value = restoredProtectedNames;
 const passesBtn = document.getElementById("passes-btn") as HTMLButtonElement;
@@ -943,12 +969,28 @@ function currentAggressiveOptions(): AggressiveOptions {
 }
 
 /** Keeps the master "Golf agressif" checkbox in sync with the 6 individual passes. */
-function syncMasterToggle(): void {
-  const states = passCheckboxes.map((cb) => cb.checked);
-  const allOn = states.every(Boolean);
-  const anyOn = states.some(Boolean);
-  aggressiveToggle.checked = allOn;
-  aggressiveToggle.indeterminate = anyOn && !allOn;
+/** Ticks the checkboxes belonging to `level`'s preset, clearing every other one. */
+function applyGolfLevel(level: GolfLevel): void {
+  const on = new Set(GOLF_LEVEL_PASSES[level]);
+  passCheckboxes.forEach((cb) => (cb.checked = on.has(cb)));
+  golfLevelSelect.value = level;
+}
+
+/**
+ * Keeps the level dropdown in sync with the 10 individual pass
+ * checkboxes: if their current combination matches a preset exactly,
+ * shows that preset; otherwise falls onto the hidden "custom" option
+ * (present in the DOM but not offered as a manual choice) — the
+ * `<select>` equivalent of the old master checkbox's `.indeterminate`
+ * state for the boolean toggle this replaced.
+ */
+function syncGolfLevelSelect(): void {
+  const checkedSet = new Set(passCheckboxes.filter((cb) => cb.checked));
+  const match = (Object.keys(GOLF_LEVEL_PASSES) as GolfLevel[]).find((level) => {
+    const preset = GOLF_LEVEL_PASSES[level];
+    return preset.length === checkedSet.size && preset.every((cb) => checkedSet.has(cb));
+  });
+  golfLevelSelect.value = match ?? "custom";
 }
 
 let lastResults: Partial<Record<Exclude<BufferId, "common">, GolfResult>> = {};
@@ -1112,14 +1154,14 @@ function golfProject(): void {
 }
 
 runBtn.addEventListener("click", golfProject);
-aggressiveToggle.addEventListener("change", () => {
-  passCheckboxes.forEach((cb) => (cb.checked = aggressiveToggle.checked));
-  aggressiveToggle.indeterminate = false;
+golfLevelSelect.addEventListener("change", () => {
+  if (golfLevelSelect.value === "custom") return; // not a real user choice, just the sync target
+  applyGolfLevel(golfLevelSelect.value as GolfLevel);
   golfProject();
 });
 passCheckboxes.forEach((cb) =>
   cb.addEventListener("change", () => {
-    syncMasterToggle();
+    syncGolfLevelSelect();
     golfProject();
   }),
 );
@@ -1327,7 +1369,7 @@ exportBtn.addEventListener("click", exportToShadertoy);
 applyTranslations();
 setActiveTab("source");
 resizeCanvas();
-syncMasterToggle();
+syncGolfLevelSelect();
 wasmReady.finally(() => {
   engineLabelEl.textContent = engineLabel;
   golfProject();

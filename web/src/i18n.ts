@@ -22,9 +22,13 @@ const fr: Dict = {
   "engine.activeLabel": "moteur actif : ",
   "panel.golfed.prefix": "Golfé — ",
   "panel.viewport.title": "Viewport temps réel",
-  "toggle.aggressive.label": "Golf agressif",
-  "toggle.aggressive.title":
-    "Coche/décoche les 8 passes ci-dessous d'un coup. Chacune reste réglable individuellement — voir ROADMAP.md pour ce que chaque passe fait et ne fait pas.",
+  "golfLevel.label": "Niveau",
+  "golfLevel.title":
+    "Applique un préréglage aux passes agressives ci-dessous (chacune reste réglable individuellement dans le popover \"Passes\"). Pas de niveau \"max-risk\" : toutes les passes implémentées sont sûres par construction, pas heuristiques — voir ROADMAP.md.",
+  "golfLevel.safe": "Sûr",
+  "golfLevel.balanced": "Équilibré",
+  "golfLevel.aggressive": "Agressif",
+  "golfLevel.custom": "Personnalisé",
   "btn.import.title": "Importer un projet multi-buffer depuis une URL Shadertoy (nécessite une clé API Shadertoy gratuite)",
   "btn.export.title": "Exporter le projet courant au format JSON Shadertoy",
   "btn.passes.title": "Choisir individuellement les passes actives",
@@ -126,9 +130,13 @@ const en: Dict = {
   "engine.activeLabel": "active engine: ",
   "panel.golfed.prefix": "Golfed — ",
   "panel.viewport.title": "Live viewport",
-  "toggle.aggressive.label": "Aggressive golf",
-  "toggle.aggressive.title":
-    "Checks/unchecks all 8 passes below at once. Each stays individually toggleable — see ROADMAP.md for exactly what each pass does and doesn't do.",
+  "golfLevel.label": "Level",
+  "golfLevel.title":
+    "Applies a preset to the aggressive passes below (each stays individually toggleable in the \"Passes\" popover). No \"max-risk\" tier: every implemented pass is safe by construction, not heuristic — see ROADMAP.md.",
+  "golfLevel.safe": "Safe",
+  "golfLevel.balanced": "Balanced",
+  "golfLevel.aggressive": "Aggressive",
+  "golfLevel.custom": "Custom",
   "btn.import.title": "Import a multi-buffer project from a Shadertoy URL (needs a free Shadertoy API key)",
   "btn.export.title": "Export the current project as Shadertoy JSON",
   "btn.passes.title": "Choose which passes are active individually",

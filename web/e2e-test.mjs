@@ -86,10 +86,26 @@ try {
   const engineLabel = await page.evaluate(() => document.getElementById("engine-label").textContent);
   check("wasm engine is active (not the TS fallback)", engineLabel === "Rust → wasm");
 
-  await page.evaluate(() => document.getElementById("aggressive-toggle").click());
+  // Default level is "aggressive" (every pass checkbox starts ticked) —
+  // switch to "safe" and back to exercise the level dropdown itself,
+  // same click-avoidance rationale as elsewhere in this file.
+  await page.evaluate(() => {
+    const sel = document.getElementById("golf-level-select");
+    sel.value = "safe";
+    sel.dispatchEvent(new Event("change"));
+  });
+  await page.waitForTimeout(500);
+  const noErrorSafe = await page.evaluate(() => !document.getElementById("error-banner").classList.contains("visible"));
+  check("safe-level golf on the default shader has no error banner", noErrorSafe);
+
+  await page.evaluate(() => {
+    const sel = document.getElementById("golf-level-select");
+    sel.value = "aggressive";
+    sel.dispatchEvent(new Event("change"));
+  });
   await page.waitForTimeout(500);
   const noErrorAggressive = await page.evaluate(() => !document.getElementById("error-banner").classList.contains("visible"));
-  check("aggressive golf on the default shader has no error banner", noErrorAggressive);
+  check("aggressive-level golf on the default shader has no error banner", noErrorAggressive);
 
   const outputText = await page.evaluate(() => document.querySelector("#output-editor-mount .cm-content")?.textContent ?? "");
   check("golfed output is non-empty", outputText.trim().length > 0);
