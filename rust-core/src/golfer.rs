@@ -1,8 +1,8 @@
 use crate::aggressive::{
     compound_assignments, eliminate_dead_locals, eliminate_dead_stores, fold_additive_constants,
-    fold_constants, increment_decrement, merge_declarations, reduce_constant_vectors,
-    strip_redundant_braces, strip_redundant_parens, strip_trailing_void_return, ternary_from_if_else,
-    AggressiveStats, Item,
+    fold_additive_float_constants, fold_constants, fold_float_constants, increment_decrement,
+    merge_declarations, reduce_constant_vectors, strip_redundant_braces, strip_redundant_parens,
+    strip_trailing_void_return, ternary_from_if_else, AggressiveStats, Item,
 };
 use crate::lexer::{tokenize_spaced, Tok};
 use crate::vocab::{
@@ -637,6 +637,14 @@ pub fn golf_with_protected_names(
             // UI checkbox/CLI flag needed for what's really the same
             // feature getting wider coverage.
             items = fold_additive_constants(items, &mut aggressive_stats);
+            // Same toggle again: float folding (`+`/`-`/`*`, ROADMAP.md
+            // Phase 1.1) is scoped much more narrowly than int folding
+            // (no `/`, no exponents/suffixes) but is still the same
+            // feature conceptually — see `aggressive.rs`'s float-folding
+            // section comment for the precision argument that makes it
+            // safe.
+            items = fold_float_constants(items, &mut aggressive_stats);
+            items = fold_additive_float_constants(items, &mut aggressive_stats);
         }
         if aggressive.reduce_constant_vectors {
             items = reduce_constant_vectors(items, &mut aggressive_stats);
@@ -1186,16 +1194,9 @@ mod tests {
     }
 
     #[test]
-    fn refuses_to_fold_hex_or_float_literals() {
+    fn refuses_to_fold_hex_literals() {
         let r = golf("x=0xFF*2;", true);
         assert_eq!(r.code, "x=0xFF*2;");
-        assert_eq!(r.stats.aggressive.constants_folded, 0);
-
-        // Float folding is skipped entirely (precision risk between
-        // host-side and GPU-side rounding) — only the safe number-
-        // shortening pass touches these, not constant folding.
-        let r = golf("x=2.0*3.0;", true);
-        assert_eq!(r.code, "x=2.*3.;");
         assert_eq!(r.stats.aggressive.constants_folded, 0);
     }
 
@@ -1588,10 +1589,13 @@ mod tests {
     #[test]
     fn refuses_parens_around_more_than_one_primary() {
         // `scan_primary` only consumes a single primary expression, so
-        // it stops at `1.0` while the closing `)` is after `+2.0` --
-        // the mismatch means the parens are load-bearing and must stay.
-        let r = golf("void f(){float a=(1.0+2.0);foo(a);}", true);
-        assert_eq!(r.code, "void b(){float a=(1.+2.);foo(a);}");
+        // it stops at `x` while the closing `)` is after `+y` -- the
+        // mismatch means the parens are load-bearing and must stay.
+        // Uses variables rather than float literals so this exercises
+        // `strip_redundant_parens` in isolation, without the separate
+        // float constant-folding pass folding `1.0+2.0` away first.
+        let r = golf("void f(){float a=(x+y);foo(a);}", true);
+        assert_eq!(r.code, "void b(){float a=(x+y);foo(a);}");
         assert_eq!(r.stats.aggressive.redundant_parens_removed, 0);
     }
 
@@ -1654,5 +1658,120 @@ mod tests {
         let r = golf("void f(){float x=1.0;float a;a=5.0*(-x);foo(a);}", true);
         assert_eq!(r.code, "void c(){float b=1.,a;a=5.*-b;foo(a);}");
         assert_eq!(r.stats.aggressive.redundant_parens_removed, 1);
+    }
+
+    #[test]
+    fn folds_a_float_multiplication() {
+        let r = golf("void f(){float a=2.0*3.0;foo(a);}", true);
+        assert_eq!(r.code, "void b(){float a=6.;foo(a);}");
+        assert_eq!(r.stats.aggressive.constants_folded, 1);
+    }
+
+    #[test]
+    fn folds_a_float_multiplication_chain() {
+        // Counted as 2 folds, not 1: `fold_float_constants` folds
+        // `2.0*3.0` first, then sees its own freshly-pushed `6.` as the
+        // new left operand for `*4.0` in the same call (same
+        // left-to-right greedy behavior as `fold_constants` for ints).
+        let r = golf("void f(){float a=2.0*3.0*4.0;foo(a);}", true);
+        assert_eq!(r.code, "void b(){float a=24.;foo(a);}");
+        assert_eq!(r.stats.aggressive.constants_folded, 2);
+    }
+
+    #[test]
+    fn folds_a_float_additive_chain() {
+        let r = golf("void f(){float a=1.0+2.0+3.0;foo(a);}", true);
+        assert_eq!(r.code, "void b(){float a=6.;foo(a);}");
+        assert_eq!(r.stats.aggressive.constants_folded, 1);
+    }
+
+    #[test]
+    fn folds_a_negative_float_result() {
+        let r = golf("void f(){float a=3.0-5.0;foo(a);}", true);
+        assert_eq!(r.code, "void b(){float a=-2.;foo(a);}");
+        assert_eq!(r.stats.aggressive.constants_folded, 1);
+    }
+
+    #[test]
+    fn folds_a_leading_unary_sign_into_a_float_chain() {
+        let r = golf("void f(){float a=-5.0+3.0;foo(a);}", true);
+        assert_eq!(r.code, "void b(){float a=-2.;foo(a);}");
+        assert_eq!(r.stats.aggressive.constants_folded, 1);
+    }
+
+    #[test]
+    fn refuses_to_fold_a_float_additive_chain_preceded_by_a_variable() {
+        // Same trap as the int version: `x-1.0+2.0` must not be folded
+        // into `x-3.0`, since the `-` here is binary (subtracting from
+        // `x`), not a unary chain-start.
+        let r = golf("void f(){float a=x-1.0+2.0;foo(a);}", true);
+        assert_eq!(r.code, "void b(){float a=x-1.+2.;foo(a);}");
+        assert_eq!(r.stats.aggressive.constants_folded, 0);
+    }
+
+    #[test]
+    fn refuses_to_fold_float_division() {
+        // Deliberately out of scope (ROADMAP.md Phase 1.1): division is
+        // where imprecision is structurally most likely.
+        let r = golf("void f(){float a=1.0/2.0;foo(a);}", true);
+        assert_eq!(r.code, "void b(){float a=1./2.;foo(a);}");
+        assert_eq!(r.stats.aggressive.constants_folded, 0);
+    }
+
+    #[test]
+    fn refuses_float_literals_with_an_exponent_or_suffix() {
+        let r = golf("void f(){float a=1.0e5*2.0;foo(a);}", true);
+        assert_eq!(r.code, "void b(){float a=1.e5*2.;foo(a);}");
+        assert_eq!(r.stats.aggressive.constants_folded, 0);
+
+        let r = golf("void f(){float a=1.0f*2.0f;foo(a);}", true);
+        assert_eq!(r.code, "void b(){float a=1.f*2.f;foo(a);}");
+        assert_eq!(r.stats.aggressive.constants_folded, 0);
+    }
+
+    #[test]
+    fn refuses_to_fold_a_float_multiplication_that_overflows_to_infinity() {
+        let r = golf(
+            "void f(){float a=999999999999999999999999999999.0*999999999999999999999999999999.0;foo(a);}",
+            true,
+        );
+        assert_eq!(
+            r.code,
+            "void b(){float a=999999999999999999999999999999.*999999999999999999999999999999.;foo(a);}"
+        );
+        assert_eq!(r.stats.aggressive.constants_folded, 0);
+    }
+
+    #[test]
+    fn refuses_to_fold_a_float_chain_that_would_produce_negative_zero() {
+        // `-0.0-0.0` accumulates to a literal negative zero, which
+        // `format_folded_float` declines rather than try to correctly
+        // re-attach a `-` sign to an otherwise-zero magnitude — the
+        // chain is left completely unfolded rather than half-applied.
+        let r = golf("void f(){float a=-0.0-0.0;foo(a);}", true);
+        assert_eq!(r.code, "void b(){float a=-0.-0.;foo(a);}");
+        assert_eq!(r.stats.aggressive.constants_folded, 0);
+    }
+
+    #[test]
+    fn float_multiplication_then_addition_compose_across_the_fixpoint_loop() {
+        // `3.0*4.0` folds to `12.` in the multiplicative pass, then the
+        // now-adjacent `2.0+12.` folds on the next fixpoint iteration —
+        // same cascade pattern as the int version.
+        let r = golf("void f(){float a=2.0+3.0*4.0;foo(a);}", true);
+        assert_eq!(r.code, "void b(){float a=14.;foo(a);}");
+        assert_eq!(r.stats.aggressive.constants_folded, 2);
+    }
+
+    #[test]
+    fn folds_a_float_result_that_needs_host_precision_agreement() {
+        // `0.1+0.2` is the textbook float-imprecision trap in most
+        // languages' default (f64) arithmetic -- but done in `f32`
+        // (matching what a GLSL `highp` compiler must produce), it
+        // rounds to exactly the `f32` value whose shortest text is
+        // `0.3`, same as GLSL would compute at runtime.
+        let r = golf("void f(){float a=0.1+0.2;foo(a);}", true);
+        assert_eq!(r.code, "void b(){float a=0.3;foo(a);}");
+        assert_eq!(r.stats.aggressive.constants_folded, 1);
     }
 }

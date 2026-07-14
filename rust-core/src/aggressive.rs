@@ -632,6 +632,251 @@ fn push_folded_int(out: &mut Vec<Item>, value: i64) {
 }
 
 // ---------------------------------------------------------------------
+// Float constant folding (ROADMAP.md Phase 1.1) — `+`/`-`/`*` only,
+// deliberately not `/` (division is where imprecision is structurally
+// most likely, and the smallest scope keeps this first version's bug
+// surface small). Restricted to plain literals with an explicit `.`,
+// no exponent, no `u`/`f` suffix — same "simple literals only" scope
+// the roadmap calls for, extended later if it proves safe in practice.
+//
+// The precision argument that keeps this safe: arithmetic is done in
+// native `f32` (Rust's `+`/`-`/`*` on `f32` are IEEE-754 correctly-
+// rounded to the nearest representable `f32`), which is exactly what
+// the GLSL spec requires a `highp` shader compiler to produce for
+// these operations too — so the host and the GPU should agree bit for
+// bit. This is trust in the spec, the same kind every other pass here
+// already relies on (e.g. int arithmetic trusting GLSL's 32-bit
+// two's-complement semantics) — not a new category of risk.
+// ---------------------------------------------------------------------
+
+/// Parses `raw` as a plain, unsuffixed, non-hex float literal with an
+/// explicit decimal point (`2.0`, `.5`, `3.` — but not `3` alone, an
+/// `int` literal in GLSL, and not `1e5`/`2.0f`, kept out of scope for
+/// this first version). Anything else returns `None` so the caller
+/// leaves it untouched.
+fn parse_plain_float(raw: &str) -> Option<f32> {
+    if raw.is_empty() || raw.starts_with("0x") || raw.starts_with("0X") {
+        return None;
+    }
+    if raw.contains(['e', 'E', 'f', 'F', 'u', 'U']) {
+        return None;
+    }
+    if !raw.contains('.') {
+        return None;
+    }
+    if !raw.chars().all(|c| c.is_ascii_digit() || c == '.') {
+        return None;
+    }
+    raw.parse::<f32>().ok()
+}
+
+/// Evaluates `a <op> b` in native `f32` — see the module-level comment
+/// above for why this is trusted to match what a GLSL compiler
+/// produces. Declines (`None`) on a non-finite result (`+`/`-`/`*`
+/// overflowing to infinity): folding to `"inf"` wouldn't even be a
+/// valid GLSL literal, so declining is the only safe option, not just
+/// the cautious one.
+fn fold_float_op(a: f32, op: char, b: f32) -> Option<f32> {
+    let result = match op {
+        '+' => a + b,
+        '-' => a - b,
+        '*' => a * b,
+        _ => return None,
+    };
+    if !result.is_finite() {
+        return None;
+    }
+    Some(result)
+}
+
+/// Formats a finite `f32` as the shortest GLSL float-literal text that
+/// reparses to that exact value — Rust's `{}` for `f32` already
+/// produces the shortest round-tripping decimal, but never appends a
+/// trailing `.` for whole numbers (`6.0` prints as `"6"`), which would
+/// silently become an `int` literal in GLSL instead of a `float` one;
+/// this appends `.` in that case. The sign is never embedded in the
+/// returned text (callers emit a separate `-` token instead, matching
+/// how every other signed numeric literal is represented in this
+/// engine) — negative zero is declined entirely rather than handled,
+/// since a `-` token in front of a literal `0` reading as "negative
+/// zero" is a genuinely rare edge case not worth the complexity, and
+/// declining to fold is always safe. The final `parse::<f32>()`
+/// equality check is the literal safety condition ROADMAP.md Phase 1.1
+/// asks for (round-trips exactly) — expected to always hold given the
+/// above, but the check costs nothing and catches any future mistake
+/// in this function itself.
+fn format_folded_float(value: f32) -> Option<String> {
+    if !value.is_finite() || (value == 0.0 && value.is_sign_negative()) {
+        return None;
+    }
+    let magnitude = value.abs();
+    let mut text = format!("{magnitude}");
+    if !text.contains('.') && !text.contains('e') {
+        text.push('.');
+    }
+    if text.parse::<f32>() != Ok(magnitude) {
+        return None;
+    }
+    Some(text)
+}
+
+/// Pushes a folded float result as either a single `Number` item (when
+/// non-negative) or a synthesized unary-minus `Punct` followed by a
+/// `Number` of its magnitude (mirroring `push_folded_int`) — `text`
+/// must already be `value`'s magnitude as produced by
+/// `format_folded_float`.
+fn push_folded_float(out: &mut Vec<Item>, value: f32, text: String) {
+    if value.is_sign_negative() {
+        out.push(Item {
+            tok: Tok::Punct('-'),
+            text: "-".to_string(),
+            space_before: false,
+        });
+    }
+    out.push(Item {
+        tok: Tok::Number(text.clone()),
+        text,
+        space_before: false,
+    });
+}
+
+/// Folds `<float> * <float>` wherever the two literals are directly
+/// adjacent to the operator — same left-to-right greedy scan as
+/// `fold_constants`, safe unconditionally because `*` is already the
+/// tightest arithmetic precedence in GLSL (see that function's doc
+/// comment). `+`/`-` are handled separately below
+/// (`fold_additive_float_constants`) for the same precedence reason
+/// `fold_additive_constants` is separate from `fold_constants`.
+pub fn fold_float_constants(items: Vec<Item>, stats: &mut AggressiveStats) -> Vec<Item> {
+    let mut out: Vec<Item> = Vec::with_capacity(items.len());
+    let mut i = 0;
+    while i < items.len() {
+        let left = match out.last() {
+            Some(Item {
+                tok: Tok::Number(raw),
+                ..
+            }) => parse_plain_float(raw),
+            _ => None,
+        };
+        let right = if left.is_some() && matches!(items.get(i).map(|it| &it.tok), Some(Tok::Punct('*'))) {
+            match items.get(i + 1).map(|it| &it.tok) {
+                Some(Tok::Number(raw)) => parse_plain_float(raw),
+                _ => None,
+            }
+        } else {
+            None
+        };
+
+        if let (Some(a), Some(b)) = (left, right) {
+            if let Some(value) = fold_float_op(a, '*', b) {
+                if let Some(text) = format_folded_float(value) {
+                    out.pop();
+                    push_folded_float(&mut out, value, text);
+                    stats.constants_folded += 1;
+                    i += 2;
+                    continue;
+                }
+            }
+        }
+
+        out.push(items[i].clone());
+        i += 1;
+    }
+    out
+}
+
+/// Extends an additive chain of *float* literals starting at
+/// `first_num_idx`, exactly mirroring `try_extend_additive_chain`'s
+/// logic (boundary safety, "stop before a term claimed by a tighter
+/// op") but over `f32` — see that function's doc comment for the full
+/// safety argument, which applies identically here. The one addition:
+/// division (`/`) also binds tighter than `+`/`-` for floats just like
+/// `*` does, so a candidate term followed by `/` must also stop the
+/// chain (irrelevant for the int version, which never folds `/` at
+/// all — for floats this pass doesn't fold `/` either, but still must
+/// not steal a term that `/` is about to claim).
+fn try_extend_additive_float_chain(items: &[Item], first_num_idx: usize, leading_sign: f32) -> Option<(usize, f32)> {
+    let first_raw = match &items[first_num_idx].tok {
+        Tok::Number(raw) => raw,
+        _ => return None,
+    };
+    let mut value = leading_sign * parse_plain_float(first_raw)?;
+    let mut i = first_num_idx + 1;
+    let mut terms = 1;
+    while let Some(Tok::Punct(op @ ('+' | '-'))) = items.get(i).map(|it| &it.tok) {
+        let op = *op;
+        let term = match items.get(i + 1).map(|it| &it.tok) {
+            Some(Tok::Number(raw)) => parse_plain_float(raw),
+            _ => None,
+        };
+        let Some(term) = term else { break };
+        let claimed_by_tighter_op =
+            matches!(items.get(i + 2).map(|it| &it.tok), Some(Tok::Punct(c)) if matches!(c, '*' | '/'));
+        if claimed_by_tighter_op {
+            break;
+        }
+        value = fold_float_op(value, op, term)?;
+        terms += 1;
+        i += 2;
+    }
+    if terms < 2 {
+        return None;
+    }
+    Some((i, value))
+}
+
+/// Folds a run of float literals connected purely by `+`/`-` into a
+/// single literal, mirroring `fold_additive_constants` exactly (same
+/// boundary-safety rule via `additive_chain_boundary_ok`, same leading-
+/// unary-sign handling) but over `f32` via
+/// `try_extend_additive_float_chain`. Declines the whole chain (falls
+/// through to copying tokens through unchanged) if the folded value
+/// can't be safely formatted (`format_folded_float` returns `None`,
+/// e.g. a negative-zero result) — unlike the int version, float folding
+/// has a formatting step that can decline, so this can't unconditionally
+/// commit to the fold the way `fold_additive_constants` does.
+pub fn fold_additive_float_constants(items: Vec<Item>, stats: &mut AggressiveStats) -> Vec<Item> {
+    let mut out: Vec<Item> = Vec::with_capacity(items.len());
+    let mut i = 0;
+    while i < items.len() {
+        let before = if i == 0 { None } else { Some(i - 1) };
+        if additive_chain_boundary_ok(&items, before) {
+            // Case A: a bare number starts the chain directly.
+            if matches!(items[i].tok, Tok::Number(_)) {
+                if let Some((end, value)) = try_extend_additive_float_chain(&items, i, 1.0) {
+                    if let Some(text) = format_folded_float(value) {
+                        push_folded_float(&mut out, value, text);
+                        stats.constants_folded += 1;
+                        i = end;
+                        continue;
+                    }
+                }
+            }
+            // Case B: a leading unary `+`/`-` immediately followed by a
+            // number starts the chain.
+            if let Some(Tok::Punct(sign_c @ ('+' | '-'))) = items.get(i).map(|it| &it.tok) {
+                let sign_c = *sign_c;
+                if matches!(items.get(i + 1).map(|it| &it.tok), Some(Tok::Number(_))) {
+                    let leading_sign = if sign_c == '-' { -1.0 } else { 1.0 };
+                    if let Some((end, value)) = try_extend_additive_float_chain(&items, i + 1, leading_sign) {
+                        if let Some(text) = format_folded_float(value) {
+                            push_folded_float(&mut out, value, text);
+                            stats.constants_folded += 1;
+                            i = end;
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+
+        out.push(items[i].clone());
+        i += 1;
+    }
+    out
+}
+
+// ---------------------------------------------------------------------
 // Constant vector reduction — `vec3(1.,1.,1.)` -> `vec3(1.)`. Safe by
 // the GLSL spec itself, not a heuristic: a vector constructor called
 // with a single scalar argument broadcasts that value to every

@@ -158,15 +158,78 @@ aller plus vite.
       constants — le vrai gain se verra sur de vrais shaders), puis
       **3394 → 3464 octets** après extension de la fixture elle-même
       (nouveau contenu testé, pas une régression).
-- [ ] (P1) **Repliement flottant, avec garde de précision stricte.**
-      Aujourd'hui zéro repliement flottant (excuse actuelle : risque de
-      précision). Un chemin sûr existe : replier seulement quand le
-      résultat en `f64` round-trippe *exactement* vers le texte le plus
-      court possible en `f32` (la précision réelle d'un flottant GLSL)
-      — sinon refuser, comme le fait déjà `fold_int_op` en cas
-      d'overflow. Restreindre au départ à `+`/`-`/`*` entre littéraux
-      simples (pas `/`, où l'imprécision est structurellement plus
-      probable) pour limiter la surface de bugs de la première version.
+- [x] (P1) **Repliement flottant, avec garde de précision stricte.**
+      Nouvelles fonctions `fold_float_constants` (`*`, même scan glouton
+      gauche-à-droite que `fold_constants`) et
+      `fold_additive_float_constants` (`+`/`-`, même logique de chaîne
+      et de frontière sûre que `fold_additive_constants`) dans
+      `aggressive.rs`, miroir TS `foldFloatConstants`/
+      `foldAdditiveFloatConstants` dans `golfer.ts`, branchées sur le
+      **même interrupteur** `fold_constants` (toujours pas une case à
+      cocher séparée — même raisonnement que le repliement `+`/`-`
+      entier de l'item précédent). `/` volontairement exclu comme
+      prévu. Restreint aux littéraux simples : point décimal explicite
+      obligatoire, ni notation scientifique (`1e5`), ni suffixe `f`/`u`
+      — `parse_plain_float`/`parsePlainFloat` refusent tout le reste.
+      **L'argument de précision réellement utilisé, plus simple que ce
+      que cet item envisageait à l'origine** : au lieu de calculer en
+      `f64` puis vérifier un round-trip vers `f32`, le calcul se fait
+      **directement en `f32` natif** (arithmétique IEEE-754
+      correctement arrondie de Rust), exactement ce que la spec GLSL
+      exige d'un compilateur `highp` pour `+`/`-`/`*` — hôte et GPU
+      calculent donc bit à bit la même chose par construction, la même
+      confiance dans la spec que le reste du moteur accorde déjà à
+      l'arithmétique entière 32 bits. Le round-trip texte↔valeur reste
+      vérifié dans `format_folded_float`/`formatFoldedFloat` (garde bon
+      marché, jamais censée échouer vu ce qui précède, mais gratuite).
+      Cas refusés explicitement et testés : résultat non fini (overflow
+      vers l'infini), et **zéro négatif** (`-0.0-0.0` par ex. — un signe
+      `-` devant un `0` de magnitude nulle est un cas limite trop rare
+      pour la complexité de le gérer correctement ; la chaîne entière
+      est laissée intacte plutôt que repliée à moitié).
+      **Écart réel entre Rust et TS, documenté plutôt que caché** :
+      JavaScript n'a pas de type `f32` natif — `foldFloatOp` émule via
+      `Math.fround` après chaque opération native (f64), ce qui est
+      mathématiquement exact pour `+`/`-`/`*` entre deux valeurs `f32`
+      (le résultat exact tient toujours dans la précision `f64`, donc
+      `Math.fround` du résultat exact donne le même arrondi unique que
+      le matériel `f32`) — mais **l'analyse du texte source vers un
+      `f32` de départ** (`Number.parseFloat` texte→f64, puis
+      `Math.fround` f64→f32) est un double-arrondi qui peut, dans des
+      cas extrêmement rares (une valeur décimale posée quasiment
+      exactement à mi-chemin entre deux `f32`), diverger d'une
+      conversion décimal→f32 directe correctement arrondie (ce que fait
+      `str::parse::<f32>()` côté Rust). Accepté comme risque résiduel
+      documenté plutôt que résolu : ce moteur TS n'est jamais que le
+      repli de secours si le wasm ne charge pas, et ce genre de
+      littéral est quasi inexistant dans un shader écrit à la main.
+      14 nouveaux tests Rust dédiés (multiplication simple, chaîne de
+      multiplications, chaîne additive, résultat négatif, signe unaire
+      de tête, refus si précédé d'une variable, refus de la division,
+      refus de la notation scientifique/suffixe, refus overflow, refus
+      zéro négatif, composition mult→add via point fixe, `0.1+0.2`
+      calculé en `f32` — le piège classique de précision décimale,
+      vérifié qu'il donne bien `0.3` comme le ferait le GPU) + 2 tests
+      préexistants mis à jour (pas des régressions : l'un affirmait
+      explicitement "le repliement flottant est totalement absent",
+      obsolète par construction ; l'autre utilisait des littéraux
+      flottants pour tester une passe différente —
+      `strip_redundant_parens` — et a dû être changé pour des variables
+      afin de continuer à isoler ce qu'il teste réellement).
+      Fixture `constant_folding.glsl` étendue (8 nouvelles lignes
+      couvrant les mêmes cas). Parité Rust/TS/wasm 40/40, `cargo test`
+      et `cargo clippy` (×2) propres, budget de taille (Phase 0) :
+      **3657 → 3732 octets** (nouvelles lignes de fixture, pas une
+      régression sur l'existant). Suite web complète vérifiée (`tsc`,
+      `eslint`, `vite build`, `e2e`) — verte, mais **budget de bundle
+      wasm gzippé notablement plus proche de sa limite** après cet
+      item : ~56.6 KiB → ~70.8 KiB (budget CI : 80 KiB), parce que le
+      formatage/parsing `f32` "arrondi correctement, round-trip
+      garanti" tire des bouts non triviaux de la stdlib Rust (Grisu/
+      Dragon côté formatage) qui n'étaient jamais liés au binaire tant
+      que seul l'entier était golfé. Toujours sous le budget CI, mais à
+      surveiller : peu de marge reste pour d'autres items de cette
+      roadmap qui ajouteraient à leur tour du code stdlib lourd.
 - [ ] (P1) **Notation numérique optimale — comparer les représentations,
       garder la plus courte.** `shorten_number` ne fait que tailler les
       zéros ; il ne compare jamais la forme décimale à la forme

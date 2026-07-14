@@ -872,6 +872,219 @@ function foldAdditiveConstants(items: Token[], stats: AggressiveStats): Token[] 
 }
 
 // ---------------------------------------------------------------------------
+// Float constant folding (ROADMAP.md Phase 1.1) — mirrors
+// aggressive.rs's float-folding section field-for-field. `+`/`-`/`*`
+// only (not `/`, where imprecision is structurally most likely),
+// restricted to plain literals with an explicit `.`, no exponent, no
+// u/f suffix.
+//
+// JS has no native f32 type, so every arithmetic step below is
+// followed by `Math.fround` to round the (exact, since f64 has enough
+// precision to hold the true result of a single +/-/* between two f32
+// values without any loss) result to the nearest f32 — this is a
+// single correctly-rounded step, matching what real f32 hardware
+// arithmetic produces, not a double-rounded approximation of it.
+// **The one residual gap the Rust engine doesn't have**: parsing the
+// literal's *text* into a starting f32 goes through `Number.parseFloat`
+// (string -> nearest f64) then `Math.fround` (f64 -> nearest f32) — a
+// double rounding that can, in extremely rare cases (a decimal value
+// sitting almost exactly halfway between two f32 values), disagree
+// with a direct correctly-rounded decimal-to-f32 conversion (what
+// Rust's `str::parse::<f32>()` does). Not a concern in practice: this
+// TS engine is only ever the wasm-load-failure fallback
+// (`wasmGolfer.ts`), and this class of literal is exceedingly unlikely
+// in hand-written shader source.
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses `raw` as a plain, unsuffixed, non-hex float literal with an
+ * explicit decimal point (`2.0`, `.5`, `3.` — but not `3` alone, an
+ * int literal in GLSL, and not `1e5`/`2.0f`, kept out of scope for this
+ * first version). Anything else returns null so the caller leaves it
+ * untouched.
+ */
+function parsePlainFloat(raw: string): number | null {
+  if (raw.length === 0 || raw.startsWith("0x") || raw.startsWith("0X")) return null;
+  if (/[eEfFuU]/.test(raw)) return null;
+  if (!raw.includes(".") || !/^[0-9.]+$/.test(raw)) return null;
+  const n = Number.parseFloat(raw);
+  return Number.isFinite(n) ? Math.fround(n) : null;
+}
+
+/**
+ * Evaluates `a <op> b` in emulated `f32` — see the section comment
+ * above for why `Math.fround` after a plain JS (f64) operation gives
+ * the same result as real f32 arithmetic. Declines (null) on a
+ * non-finite result (`+`/`-`/`*` overflowing to infinity): folding to
+ * `"Infinity"` wouldn't even be a valid GLSL literal.
+ */
+function foldFloatOp(a: number, op: string, b: number): number | null {
+  let result: number;
+  if (op === "+") result = a + b;
+  else if (op === "-") result = a - b;
+  else if (op === "*") result = a * b;
+  else return null;
+  result = Math.fround(result);
+  return Number.isFinite(result) ? result : null;
+}
+
+/**
+ * Formats a finite f32-rounded value as the shortest GLSL float-literal
+ * text that reparses to that exact value, mirroring
+ * aggressive.rs::format_folded_float — see there for the full argument
+ * (why the sign is never embedded in the text, why negative zero is
+ * declined rather than handled, why the final round-trip check is
+ * cheap insurance rather than load-bearing).
+ */
+function formatFoldedFloat(value: number): string | null {
+  if (!Number.isFinite(value) || Object.is(value, -0)) return null;
+  const magnitude = Math.abs(value);
+  let text = String(magnitude);
+  if (!text.includes(".") && !text.includes("e")) text += ".";
+  if (Math.fround(Number.parseFloat(text)) !== magnitude) return null;
+  return text;
+}
+
+/** Pushes a folded float result, mirroring `pushFoldedInt`/`aggressive.rs::push_folded_float` — `text` must already be `value`'s magnitude as produced by `formatFoldedFloat`. */
+function pushFoldedFloat(out: Token[], value: number, text: string): void {
+  if (value < 0) {
+    out.push({ kind: "punct", text: "-", spaceBefore: false });
+  }
+  out.push({ kind: "number", text, spaceBefore: false });
+}
+
+/**
+ * Folds `<float> * <float>` wherever the two literals are directly
+ * adjacent to the operator — same left-to-right greedy scan as
+ * `foldConstants`, safe unconditionally since `*` is already GLSL's
+ * tightest arithmetic precedence. `+`/`-` are handled separately below
+ * (`foldAdditiveFloatConstants`) for the same precedence reason
+ * `foldAdditiveConstants` is separate from `foldConstants`.
+ */
+function foldFloatConstants(items: Token[], stats: AggressiveStats): Token[] {
+  const out: Token[] = [];
+  let i = 0;
+  while (i < items.length) {
+    const lastOut = out[out.length - 1];
+    const left = lastOut && lastOut.kind === "number" ? parsePlainFloat(lastOut.text) : null;
+    const opTok = items[i];
+    const isMul = left !== null && !!opTok && opTok.kind === "punct" && opTok.text === "*";
+    const rightTok = items[i + 1];
+    const right = isMul && rightTok && rightTok.kind === "number" ? parsePlainFloat(rightTok.text) : null;
+
+    if (left !== null && right !== null) {
+      const value = foldFloatOp(left, "*", right);
+      if (value !== null) {
+        const text = formatFoldedFloat(value);
+        if (text !== null) {
+          out.pop();
+          pushFoldedFloat(out, value, text);
+          stats.constantsFolded++;
+          i += 2;
+          continue;
+        }
+      }
+    }
+
+    out.push(items[i]);
+    i++;
+  }
+  return out;
+}
+
+/**
+ * Extends an additive chain of *float* literals starting at
+ * `firstNumIdx`, exactly mirroring `tryExtendAdditiveChain`'s logic
+ * (boundary safety, "stop before a term claimed by a tighter op") but
+ * over emulated f32 — see that function's doc comment for the full
+ * safety argument, which applies identically here. The one addition:
+ * division (`/`) also binds tighter than `+`/`-` for floats just like
+ * `*` does, so a candidate term followed by `/` must also stop the
+ * chain.
+ */
+function tryExtendAdditiveFloatChain(items: Token[], firstNumIdx: number, leadingSign: number): [number, number] | null {
+  const firstTok = items[firstNumIdx];
+  if (!firstTok || firstTok.kind !== "number") return null;
+  const firstVal = parsePlainFloat(firstTok.text);
+  if (firstVal === null) return null;
+  let value = leadingSign * firstVal;
+  let i = firstNumIdx + 1;
+  let terms = 1;
+  for (;;) {
+    const opTok = items[i];
+    if (!opTok || opTok.kind !== "punct" || (opTok.text !== "+" && opTok.text !== "-")) break;
+    const termTok = items[i + 1];
+    const term = termTok && termTok.kind === "number" ? parsePlainFloat(termTok.text) : null;
+    if (term === null) break;
+    const afterTok = items[i + 2];
+    const claimedByTighterOp = !!afterTok && afterTok.kind === "punct" && ["*", "/"].includes(afterTok.text);
+    if (claimedByTighterOp) break;
+    const folded = foldFloatOp(value, opTok.text, term);
+    if (folded === null) return null;
+    value = folded;
+    terms++;
+    i += 2;
+  }
+  if (terms < 2) return null;
+  return [i, value];
+}
+
+/**
+ * Folds a run of float literals connected purely by +/- into a single
+ * literal, mirroring `foldAdditiveConstants` exactly (same boundary-
+ * safety rule via `additiveChainBoundaryOk`, same leading-unary-sign
+ * handling) but over emulated f32 via `tryExtendAdditiveFloatChain`.
+ * Declines the whole chain (falls through to copying tokens through
+ * unchanged) if the folded value can't be safely formatted
+ * (`formatFoldedFloat` returns null, e.g. a negative-zero result) —
+ * unlike the int version, float folding has a formatting step that can
+ * decline, so this can't unconditionally commit to the fold the way
+ * `foldAdditiveConstants` does.
+ */
+function foldAdditiveFloatConstants(items: Token[], stats: AggressiveStats): Token[] {
+  const out: Token[] = [];
+  let i = 0;
+  while (i < items.length) {
+    const before = i === 0 ? null : i - 1;
+    if (additiveChainBoundaryOk(items, before)) {
+      const tok = items[i];
+      if (tok.kind === "number") {
+        const chain = tryExtendAdditiveFloatChain(items, i, 1);
+        if (chain) {
+          const text = formatFoldedFloat(chain[1]);
+          if (text !== null) {
+            pushFoldedFloat(out, chain[1], text);
+            stats.constantsFolded++;
+            i = chain[0];
+            continue;
+          }
+        }
+      }
+      if (tok.kind === "punct" && (tok.text === "+" || tok.text === "-")) {
+        const nextTok = items[i + 1];
+        if (nextTok && nextTok.kind === "number") {
+          const leadingSign = tok.text === "-" ? -1 : 1;
+          const chain = tryExtendAdditiveFloatChain(items, i + 1, leadingSign);
+          if (chain) {
+            const text = formatFoldedFloat(chain[1]);
+            if (text !== null) {
+              pushFoldedFloat(out, chain[1], text);
+              stats.constantsFolded++;
+              i = chain[0];
+              continue;
+            }
+          }
+        }
+      }
+    }
+
+    out.push(items[i]);
+    i++;
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Constant vector reduction — `vec3(1.,1.,1.)` -> `vec3(1.)`. Safe by the
 // GLSL spec itself, not a heuristic: a vector constructor called with a
 // single scalar argument broadcasts that value to every component, which
@@ -2032,6 +2245,9 @@ export function golf(
       // Same toggle, not a separate one — see the same comment in
       // golfer.rs::golf_with_protected_names.
       items = foldAdditiveConstants(items, aggressiveStats);
+      // Same toggle again: float folding (ROADMAP.md Phase 1.1).
+      items = foldFloatConstants(items, aggressiveStats);
+      items = foldAdditiveFloatConstants(items, aggressiveStats);
     }
     if (options.reduceConstantVectors) items = reduceConstantVectors(items, aggressiveStats);
     if (options.compoundAssignments) items = compoundAssignments(items, aggressiveStats);

@@ -25,5 +25,14 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
     int p = 2147483647 + 1;
     int q = -1 - 2 * 3;
 
-    fragColor = vec4(float(a + b + c + d + e + f + g + h + j + k + l + m + n + o + p + q) + x, 0.0, 0.0, 1.0);
+    float r = 2.0 * 3.0;
+    float s = 1.0 + 2.0 + 3.0;
+    float t = 3.0 - 5.0;
+    float u = -5.0 + 3.0;
+    float v = x - 1.0 + 2.0;
+    float w = 1.0 / 2.0;
+    float aa = 2.0 + 3.0 * 4.0;
+    float ab = 1.0e5 * 2.0;
+
+    fragColor = vec4(float(a + b + c + d + e + f + g + h + j + k + l + m + n + o + p + q) + x + r + s + t + u + v + w + aa + ab, 0.0, 0.0, 1.0);
 }
