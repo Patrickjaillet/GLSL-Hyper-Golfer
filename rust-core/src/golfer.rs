@@ -274,35 +274,148 @@ fn extend_left_to_params(tokens: &[Tok], body_open: usize) -> usize {
     body_open
 }
 
-/// The token-index span of every function body in the file (parameters
-/// through the closing brace), used to scope-partition renaming: two
-/// locals in two *different* function scopes never conflict, and can
-/// safely be handed the same short name — see `find_renamable` and
-/// `golf()`. Struct bodies are excluded (their "members" are handled
-/// separately, see `struct_body_ranges`); everything else at the top
-/// level is assumed to be a function (the only other top-level brace
-/// construct GLSL has — interface/uniform blocks — isn't used by this
-/// app's shaders, and would just be harmlessly treated as a "function"
-/// with no params here if it appeared).
-fn function_scope_ranges(tokens: &[Tok]) -> Vec<(usize, usize)> {
-    let struct_bodies = struct_body_ranges(tokens);
-    top_level_brace_ranges(tokens)
-        .into_iter()
-        .filter(|(open, _)| !struct_bodies.iter().any(|(s, _)| s == open))
-        .map(|(open, close)| (extend_left_to_params(tokens, open), close))
-        .collect()
+/// One lexical block scope available for renaming (ROADMAP.md Phase
+/// 1.3): `open`/`close` is the token-index span — parameter list (or
+/// `for`-header) through the closing brace when one immediately
+/// precedes it (see `extend_left_to_params`), otherwise just the bare
+/// `{...}`. That span alone is enough to answer every question this
+/// pass needs (does this scope contain that position; are these two
+/// scopes mutually disjoint), so no explicit parent link is kept —
+/// containment is just an `open`/`close` comparison. Built by
+/// `block_scope_tree`.
+struct BlockScope {
+    open: usize,
+    close: usize,
 }
 
-/// Which independently-renamable scope a declaration belongs to.
-/// `Local(i)` is only visible within `function_scope_ranges(tokens)[i]`;
-/// `Global` is visible everywhere (true globals, struct/function names,
-/// and — conservatively — any name whose declaration pattern matches in
-/// more than one place, since this pass doesn't track *which* of
-/// several same-named declarations a given use refers to).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+/// Finds the matching `}` for a `{` at `open`, or `None` if unbalanced
+/// — same depth-tracking scan `top_level_brace_ranges` and
+/// `struct_body_ranges` each already do inline, factored out here since
+/// `block_scope_tree` needs it at arbitrary nesting depth, not just at
+/// brace-depth 0.
+fn matching_close_brace(tokens: &[Tok], open: usize) -> Option<usize> {
+    if !matches!(tokens.get(open), Some(Tok::Punct('{'))) {
+        return None;
+    }
+    let mut depth = 0i32;
+    let mut k = open;
+    loop {
+        match tokens.get(k) {
+            Some(Tok::Punct('{')) => depth += 1,
+            Some(Tok::Punct('}')) => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(k);
+                }
+            }
+            None => return None,
+            _ => {}
+        }
+        k += 1;
+    }
+}
+
+/// Builds the full tree of lexical block scopes available for renaming:
+/// every top-level function body, plus every `{...}` nested inside one
+/// at any depth (an `if`/`for`/`while`/`do` body, or a bare compound
+/// statement) — GLSL introduces a fresh scope at each of these, not
+/// just at function boundaries. Two scopes that never overlap in the
+/// token stream (siblings, cousins, or scopes in entirely different
+/// functions) can safely reuse the exact same short name for two
+/// *different* original identifiers: the substitution `golf()` performs
+/// is keyed by original spelling alone, applied uniformly wherever that
+/// spelling appears, so as long as a spelling's own declarations never
+/// span two scopes where one contains the other, renaming it consistently
+/// can never be confused with a same-named-but-different declaration
+/// elsewhere (see `find_renamable`'s `mutually_disjoint` check, which is
+/// what actually enforces that condition before allowing the reuse).
+///
+/// Struct bodies are excluded, same as the old function-only version —
+/// GLSL structs can't be declared inside a function body, so they only
+/// ever show up as a top-level entry from `top_level_brace_ranges` in
+/// the first place, never nested.
+fn block_scope_tree(tokens: &[Tok]) -> Vec<BlockScope> {
+    let struct_bodies = struct_body_ranges(tokens);
+    let mut scopes: Vec<BlockScope> = Vec::new();
+
+    fn register(tokens: &[Tok], brace_open: usize, brace_close: usize, scopes: &mut Vec<BlockScope>) {
+        let open = extend_left_to_params(tokens, brace_open);
+        scopes.push(BlockScope {
+            open,
+            close: brace_close,
+        });
+        let mut i = brace_open + 1;
+        while i < brace_close {
+            if matches!(tokens[i], Tok::Punct('{')) {
+                if let Some(inner_close) = matching_close_brace(tokens, i) {
+                    register(tokens, i, inner_close, scopes);
+                    i = inner_close + 1;
+                    continue;
+                }
+            }
+            i += 1;
+        }
+    }
+
+    for (open, close) in top_level_brace_ranges(tokens) {
+        if struct_bodies.iter().any(|(s, _)| *s == open) {
+            continue;
+        }
+        register(tokens, open, close, &mut scopes);
+    }
+    scopes
+}
+
+/// The innermost (deepest-nested) scope in `scopes` whose span strictly
+/// contains `pos`, or `None` if `pos` isn't inside any of them (true
+/// global scope, outside every function). Picking the containing scope
+/// with the largest `open` is correct because this tree never has
+/// partial overlaps — a child's span is always a strict subset of its
+/// parent's, so the deepest match is always the one that starts latest.
+fn innermost_scope(pos: usize, scopes: &[BlockScope]) -> Option<usize> {
+    scopes
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| pos > s.open && pos < s.close)
+        .max_by_key(|(_, s)| s.open)
+        .map(|(idx, _)| idx)
+}
+
+/// Are all of `indices` mutually non-overlapping in the token stream?
+/// In a proper nesting tree (no partial overlaps ever occur), any two
+/// spans are either completely disjoint or one strictly contains the
+/// other — so this only has to rule out the "one contains the other"
+/// case for every pair, not run a general interval-overlap test.
+fn mutually_disjoint(indices: &[usize], scopes: &[BlockScope]) -> bool {
+    for i in 0..indices.len() {
+        for j in (i + 1)..indices.len() {
+            let a = &scopes[indices[i]];
+            let b = &scopes[indices[j]];
+            if !(a.close < b.open || b.close < a.open) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// Which independently-renamable scope(s) a name's declaration(s)
+/// belong to. `Local(indices)` is visible only within the listed block
+/// scopes (see `block_scope_tree`) — more than one index means the
+/// exact same spelling was independently declared in more than one
+/// scope, which is only ever collected here when `mutually_disjoint`
+/// has already confirmed none of those scopes is nested inside another
+/// (two disjoint `for(int i=0;...)` loops in the same function are the
+/// common case this exists for — ROADMAP.md Phase 1.3). `Global` is
+/// visible everywhere (true globals, struct/function names, and —
+/// conservatively — any name whose declaration pattern matches in
+/// scopes that *aren't* mutually disjoint, since this pass doesn't
+/// track *which* of several same-named declarations a given use refers
+/// to, the same fallback the single-scope version already relied on).
+#[derive(Clone, PartialEq, Eq, Debug)]
 enum Scope {
     Global,
-    Local(usize),
+    Local(Vec<usize>),
 }
 
 /// Extracts every identifier-shaped substring (`[A-Za-z_][A-Za-z0-9_]*`)
@@ -369,14 +482,18 @@ fn find_renamable(tokens: &[Tok]) -> Vec<(String, Scope)> {
     let protected = protected_host_names();
     let struct_bodies = struct_body_ranges(tokens);
     let preproc_names = preproc_referenced_names(tokens);
-    let function_scopes = function_scope_ranges(tokens);
+    let block_scopes = block_scope_tree(tokens);
 
     let mut freq: HashMap<String, usize> = HashMap::new();
     let mut first_seen: HashMap<String, usize> = HashMap::new();
     // Every scope a name's declaration pattern matched in. More than one
     // distinct scope (or a global alongside any local) means we can't
-    // tell which use belongs to which declaration site, so it's treated
-    // as Global — the always-safe fallback. See `Scope`.
+    // tell which use belongs to which declaration site, so it's usually
+    // treated as Global — the always-safe fallback — *unless* every one
+    // of those scopes turns out to be mutually disjoint (ROADMAP.md
+    // Phase 1.3: e.g. the same `int i` counter declared independently
+    // in two separate, non-overlapping `for` loops), in which case it
+    // can still be kept Local across all of them. See `Scope`.
     let mut scopes_seen: HashMap<String, HashSet<Option<usize>>> = HashMap::new();
 
     for (idx, tok) in tokens.iter().enumerate() {
@@ -398,10 +515,8 @@ fn find_renamable(tokens: &[Tok]) -> Vec<(String, Scope)> {
                 && !strictly_inside_any(i + 1, &struct_bodies)
                 && !preproc_names.contains(b.as_str())
             {
-                let fn_idx = function_scopes
-                    .iter()
-                    .position(|(s, e)| i + 1 > *s && i + 1 < *e);
-                scopes_seen.entry(b.clone()).or_default().insert(fn_idx);
+                let scope_idx = innermost_scope(i + 1, &block_scopes);
+                scopes_seen.entry(b.clone()).or_default().insert(scope_idx);
             }
         }
     }
@@ -409,9 +524,17 @@ fn find_renamable(tokens: &[Tok]) -> Vec<(String, Scope)> {
     let mut list: Vec<(String, Scope)> = scopes_seen
         .into_iter()
         .map(|(name, tags)| {
-            let scope = match tags.into_iter().collect::<Vec<_>>().as_slice() {
-                [Some(idx)] => Scope::Local(*idx),
-                _ => Scope::Global,
+            let all_local = tags.iter().all(|t| t.is_some());
+            let scope = if all_local {
+                let mut indices: Vec<usize> = tags.into_iter().flatten().collect();
+                indices.sort_unstable();
+                if mutually_disjoint(&indices, &block_scopes) {
+                    Scope::Local(indices)
+                } else {
+                    Scope::Global
+                }
+            } else {
+                Scope::Global
             };
             (name, scope)
         })
@@ -574,38 +697,62 @@ pub fn golf_with_protected_names(
     // missing until now.
     taken.extend(preproc_referenced_names(&tokens));
 
-    // Scope-aware assignment: `taken` holds names visible *everywhere*
-    // (keywords/builtins/protected/untouched-originals plus every
-    // already-assigned Global name), while `local_taken[i]` holds names
-    // already claimed within function scope `i` alone. Two locals in
-    // *different* function scopes never conflict — `for(int i...)` in
-    // one function and `for(int i...)` in a completely unrelated one
-    // can both become `for(int a...)` — so each scope gets its own
-    // fresh a,b,c... search rather than sharing one ever-growing
-    // sequence across the whole file. Declarations are still assigned
-    // in frequency order across *all* scopes together (that ordering
-    // comes from `find_renamable`), so a hot local still outranks a
-    // rarely-used global for the shortest names — only the pool of
-    // candidates each one draws from is scope-partitioned.
+    // Scope-aware assignment (ROADMAP.md Phase 1.3): `taken` holds names
+    // visible *everywhere* (keywords/builtins/protected/untouched-
+    // originals plus every already-assigned Global name), while
+    // `local_taken[i]` holds names already claimed within block scope
+    // `i` alone (see `block_scope_tree` — a scope here is any `{...}`,
+    // not just a function body). A Local candidate must avoid this
+    // candidate wherever it's already used by any scope that isn't
+    // *mutually disjoint* from it (checked via `mutually_disjoint` against
+    // every scope decided so far, not just an ancestor walk — see the
+    // comment at the check itself for why "ancestors only" is a real bug,
+    // not just an oversight caught in review). It never needs to avoid a
+    // genuinely unrelated sibling/cousin scope's names — `for(int i...)`
+    // in one `if` branch and `for(int i...)` in a disjoint `else` branch
+    // (or a different function entirely) can both become `for(int a...)`,
+    // which is exactly the reuse this scope-partitioning is for.
+    // Declarations are still assigned in frequency order across *all*
+    // scopes together (that ordering comes from `find_renamable`), so a
+    // hot local still outranks a rarely-used global for the shortest
+    // names — only the pool of candidates each one draws from is
+    // scope-partitioned.
+    let block_scopes = block_scope_tree(&tokens);
     let mut local_taken: HashMap<usize, HashSet<String>> = HashMap::new();
     let mut rename_map: HashMap<String, String> = HashMap::new();
     for (original, scope) in &renamable {
         let mut gen = NameGen::new();
         loop {
             let candidate = gen.next().unwrap();
-            // A Global name is visible from *inside* every function too
+            // A Global name is visible from *inside* every scope too
             // (including, notably, a function's own name being visible
             // within its own body — e.g. for recursion), so assigning
             // one must avoid every scope's local names, not just other
-            // globals. A Local name only needs to avoid globals and its
-            // own function's other locals — a *different* function's
-            // locals are never visible here, which is exactly the reuse
-            // this scope-partitioning is for.
+            // globals.
+            // A Local scope must avoid this candidate wherever it's
+            // already used by *any* scope that isn't fully disjoint from
+            // it — not just its own ancestors. Assignment order is
+            // frequency-driven, not tree order, so a nested scope (a
+            // `for` loop's own counter, say) can easily be decided
+            // *before* the outer scope it's nested inside (a function's
+            // own local) — checking ancestors alone would miss that the
+            // outer scope's variable is visible throughout the inner
+            // scope regardless of which one got assigned first. This
+            // was a real bug caught by manual testing, not just reasoned
+            // through in advance: `float s=0.;for(int i=0;...)` with two
+            // *separate* loops both counting with `i` produced `float
+            // a=0.;for(int a=0;...)...` — `s` and the loop counter `i`
+            // both became `a`, a genuine collision, because the
+            // ancestors-only check let the outer `s` reuse whatever its
+            // *descendant* for-loop scopes had already claimed.
             let collides = taken.contains(&candidate)
                 || match scope {
-                    Scope::Local(idx) => local_taken
-                        .get(idx)
-                        .is_some_and(|s| s.contains(&candidate)),
+                    Scope::Local(indices) => local_taken.iter().any(|(other_idx, names)| {
+                        names.contains(&candidate)
+                            && indices
+                                .iter()
+                                .any(|idx| !mutually_disjoint(&[*idx, *other_idx], &block_scopes))
+                    }),
                     Scope::Global => local_taken.values().any(|s| s.contains(&candidate)),
                 };
             if collides {
@@ -615,8 +762,10 @@ pub fn golf_with_protected_names(
                 Scope::Global => {
                     taken.insert(candidate.clone());
                 }
-                Scope::Local(idx) => {
-                    local_taken.entry(*idx).or_default().insert(candidate.clone());
+                Scope::Local(indices) => {
+                    for idx in indices {
+                        local_taken.entry(*idx).or_default().insert(candidate.clone());
+                    }
                 }
             }
             rename_map.insert(original.clone(), candidate);
@@ -1569,6 +1718,94 @@ mod tests {
     }
 
     #[test]
+    fn block_scope_renaming_reuses_a_name_across_disjoint_if_else_branches() {
+        // ROADMAP.md Phase 1.3's own motivating example: two locals in
+        // an if-branch and its else-branch never coexist (only one
+        // branch ever runs), so despite having different original
+        // spellings they can safely share the exact same short name —
+        // something the old function-level-only scoping couldn't do.
+        let r = golf(
+            "void mainImage(out vec4 fragColor,in vec2 fragCoord){float x=0.0;if(x>0.5){float tempResult=x*2.0;x=tempResult;}else{float otherThing=x+1.0;x=otherThing;}fragColor=vec4(x);}",
+            true,
+        );
+        assert_eq!(
+            r.code,
+            "void mainImage(out vec4 b,in vec2 d){float a=0.;if(a>.5){float c=a*2.;a=c;}else{float c=a+1.;a=c;}b=vec4(a);}"
+        );
+    }
+
+    #[test]
+    fn block_scope_renaming_reuses_a_loop_counter_across_two_disjoint_for_loops() {
+        let r = golf(
+            "void mainImage(out vec4 fragColor,in vec2 fragCoord){float s=0.0;for(int i=0;i<3;i++){s+=float(i);}for(int i=0;i<5;i++){s+=float(i)*2.0;}fragColor=vec4(s);}",
+            true,
+        );
+        assert_eq!(
+            r.code,
+            "void mainImage(out vec4 c,in vec2 d){float b=0.;for(int a=0;a<3;a++)b+=float(a);for(int a=0;a<5;a++)b+=float(a)*2.;c=vec4(b);}"
+        );
+    }
+
+    #[test]
+    fn block_scope_renaming_never_collides_a_descendant_scope_with_its_ancestor() {
+        // Regression test for a real bug caught by manual testing, not
+        // just reasoned through in advance: assignment order is
+        // frequency-driven, not tree order, so the `for` loops' shared
+        // counter `i` (a *descendant* scope) can easily be decided
+        // *before* the outer function-level accumulator `s` (its
+        // *ancestor*). An ancestors-only collision check (only looking
+        // "up" from the scope being assigned) misses this entirely,
+        // since checking upward from `s` (which has no ancestors of its
+        // own) never sees what its own *descendants* already claimed —
+        // producing `float a=0.;for(int a=0;...)`, an actual collision
+        // between two genuinely different variables. Fixed by checking
+        // mutual disjointness against *every* previously-decided scope,
+        // not just ancestors. This test and the one above assert on the
+        // same source; kept as two separate tests so a future
+        // regression here fails with an obviously-named test rather
+        // than requiring the reader to infer the deeper reason from the
+        // "reuses a loop counter" test's name alone.
+        let r = golf(
+            "void mainImage(out vec4 fragColor,in vec2 fragCoord){float s=0.0;for(int i=0;i<3;i++){s+=float(i);}for(int i=0;i<5;i++){s+=float(i)*2.0;}fragColor=vec4(s);}",
+            true,
+        );
+        assert_ne!(
+            r.code, "void mainImage(out vec4 c,in vec2 d){float a=0.;for(int a=0;a<3;a++)a+=float(a);for(int a=0;a<5;a++)a+=float(a)*2.;c=vec4(a);}",
+            "the loop counter and the outer accumulator must never be renamed to the same identifier"
+        );
+    }
+
+    #[test]
+    fn block_scope_renaming_never_reuses_a_name_across_nested_scopes() {
+        // The opposite case from the two tests above: `mid` is nested
+        // *inside* the `if` that declares `outer`, and `inner` is nested
+        // inside *that* -- a genuine ancestor/descendant chain, where
+        // reusing a name would be a real collision (the outer variable
+        // stays visible throughout, unlike two disjoint sibling
+        // branches). All three must get distinct names.
+        let r = golf(
+            "void mainImage(out vec4 fragColor,in vec2 fragCoord){float outer=1.0;if(outer>0.0){float mid=2.0;if(mid>0.0){float inner=3.0;outer=inner;}}fragColor=vec4(outer);}",
+            true,
+        );
+        assert_eq!(
+            r.code,
+            "void mainImage(out vec4 b,in vec2 e){float a=1.;if(a>0.){float c=2.;if(c>0.){float d=3.;a=d;}}b=vec4(a);}"
+        );
+    }
+
+    #[test]
+    fn block_scope_renaming_reuses_a_name_across_three_disjoint_sibling_blocks() {
+        let r = golf(
+            "void mainImage(out vec4 fragColor,in vec2 fragCoord){if(true){float a1=1.0;fragColor=vec4(a1);}else{float b1=2.0;fragColor=vec4(b1);}if(true){float c1=3.0;fragColor+=vec4(c1);}}",
+            true,
+        );
+        assert_eq!(
+            r.code,
+            "void mainImage(out vec4 a,in vec2 c){if(true){float b=1.;a=vec4(b);}else{float b=2.;a=vec4(b);}if(true){float b=3.;a+=vec4(b);}}"
+        );
+    }
+
+    #[test]
     fn eliminates_a_chain_of_adjacent_dead_stores() {
         // Each write is immediately superseded by the next with no read
         // in between, so only the last ("x=3.;") survives.
@@ -1990,14 +2227,18 @@ mod tests {
     fn keeps_a_function_reachable_only_transitively() {
         // mainImage calls `a`, which calls `b` -- `b` is never called
         // *directly* by an entry point, only reachable through the
-        // call graph, and must still survive.
+        // call graph, and must still survive. Also incidentally
+        // exercises ROADMAP.md Phase 1.3: `x` is a parameter name
+        // reused (as two separate declarations) in both `a` and `b`,
+        // now kept Local across both instead of forced Global, which
+        // frees up `a` for mainImage's own first param.
         let r = golf(
             "float a(float x){return b(x);}float b(float x){return x*2.0;}void mainImage(out vec4 fragColor,in vec2 fragCoord){fragColor=vec4(a(1.0));}",
             true,
         );
         assert_eq!(
             r.code,
-            "float b(float a){return c(a);}float c(float a){return a*2.;}void mainImage(out vec4 d,in vec2 e){d=vec4(b(1.));}"
+            "float b(float a){return c(a);}float c(float a){return a*2.;}void mainImage(out vec4 a,in vec2 d){a=vec4(b(1.));}"
         );
         assert_eq!(r.stats.aggressive.dead_functions_removed, 0);
     }
@@ -2028,7 +2269,7 @@ mod tests {
         );
         assert_eq!(
             r.code,
-            "float b(float a){return a;}float b(vec2 a){return a.x;}void mainImage(out vec4 c,in vec2 d){c=vec4(b(1.));}"
+            "float b(float a){return a;}float b(vec2 a){return a.x;}void mainImage(out vec4 a,in vec2 c){a=vec4(b(1.));}"
         );
         assert_eq!(r.stats.aggressive.dead_functions_removed, 0);
     }

@@ -467,21 +467,131 @@ function extendLeftToParams(tokens: Token[], bodyOpen: number): number {
 }
 
 /**
- * The token-index span of every function body in the file (parameters
- * through the closing brace), used to scope-partition renaming: two
- * locals in two *different* function scopes never conflict, and can
- * safely be handed the same short name — see findRenamable and golf().
- * Struct bodies are excluded.
+ * One lexical block scope available for renaming (ROADMAP.md Phase
+ * 1.3): the token-index span — parameter list (or `for`-header)
+ * through the closing brace when one immediately precedes it (see
+ * `extendLeftToParams`), otherwise just the bare `{...}`. That span
+ * alone is enough to answer every question this pass needs (does this
+ * scope contain that position; are these two scopes mutually
+ * disjoint), so no explicit parent link is kept.
  */
-function functionScopeRanges(tokens: Token[]): Array<[number, number]> {
-  const structBodies = structBodyRanges(tokens);
-  return topLevelBraceRanges(tokens)
-    .filter(([open]) => !structBodies.some(([s]) => s === open))
-    .map(([open, close]): [number, number] => [extendLeftToParams(tokens, open), close]);
+interface BlockScope {
+  open: number;
+  close: number;
 }
 
-/** Which independently-renamable scope a declaration belongs to — see `functionScopeRanges`. `null` means Global (visible everywhere). */
-type Scope = number | null;
+/** Finds the matching `}` for a `{` at `open`, or -1 if unbalanced. */
+function matchingCloseBrace(tokens: Token[], open: number): number {
+  if (!isPunct(tokens[open], "{")) return -1;
+  let depth = 0;
+  for (let k = open; k < tokens.length; k++) {
+    if (isPunct(tokens[k], "{")) depth++;
+    else if (isPunct(tokens[k], "}")) {
+      depth--;
+      if (depth === 0) return k;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Builds the full tree of lexical block scopes available for renaming:
+ * every top-level function body, plus every `{...}` nested inside one
+ * at any depth (an `if`/`for`/`while`/`do` body, or a bare compound
+ * statement) — GLSL introduces a fresh scope at each of these, not
+ * just at function boundaries. Two scopes that never overlap in the
+ * token stream (siblings, cousins, or scopes in entirely different
+ * functions) can safely reuse the exact same short name for two
+ * *different* original identifiers: the substitution `golf()` performs
+ * is keyed by original spelling alone, applied uniformly wherever that
+ * spelling appears, so as long as a spelling's own declarations never
+ * span two scopes where one contains the other, renaming it
+ * consistently can never be confused with a same-named-but-different
+ * declaration elsewhere (see `findRenamable`'s `mutuallyDisjoint`
+ * check, which is what actually enforces that condition before
+ * allowing the reuse). Struct bodies are excluded — GLSL structs can't
+ * be declared inside a function body, so they only ever show up as a
+ * top-level entry from `topLevelBraceRanges`, never nested. Mirrors
+ * `golfer.rs::block_scope_tree` exactly.
+ */
+function blockScopeTree(tokens: Token[]): BlockScope[] {
+  const structBodies = structBodyRanges(tokens);
+  const scopes: BlockScope[] = [];
+
+  function register(braceOpen: number, braceClose: number): void {
+    const open = extendLeftToParams(tokens, braceOpen);
+    scopes.push({ open, close: braceClose });
+    let i = braceOpen + 1;
+    while (i < braceClose) {
+      if (isPunct(tokens[i], "{")) {
+        const innerClose = matchingCloseBrace(tokens, i);
+        if (innerClose !== -1) {
+          register(i, innerClose);
+          i = innerClose + 1;
+          continue;
+        }
+      }
+      i++;
+    }
+  }
+
+  for (const [open, close] of topLevelBraceRanges(tokens)) {
+    if (structBodies.some(([s]) => s === open)) continue;
+    register(open, close);
+  }
+  return scopes;
+}
+
+/**
+ * The innermost (deepest-nested) scope in `scopes` whose span strictly
+ * contains `pos`, or -1 if `pos` isn't inside any of them (true global
+ * scope, outside every function). Picking the containing scope with
+ * the largest `open` is correct because this tree never has partial
+ * overlaps — a child's span is always a strict subset of its parent's,
+ * so the deepest match is always the one that starts latest.
+ */
+function innermostScope(pos: number, scopes: BlockScope[]): number {
+  let best = -1;
+  for (let i = 0; i < scopes.length; i++) {
+    const s = scopes[i];
+    if (pos > s.open && pos < s.close && (best === -1 || s.open > scopes[best].open)) best = i;
+  }
+  return best;
+}
+
+/**
+ * Are all of `indices` mutually non-overlapping in the token stream?
+ * In a proper nesting tree (no partial overlaps ever occur), any two
+ * spans are either completely disjoint or one strictly contains the
+ * other — so this only has to rule out the "one contains the other"
+ * case for every pair, not run a general interval-overlap test.
+ */
+function mutuallyDisjoint(indices: number[], scopes: BlockScope[]): boolean {
+  for (let i = 0; i < indices.length; i++) {
+    for (let j = i + 1; j < indices.length; j++) {
+      const a = scopes[indices[i]];
+      const b = scopes[indices[j]];
+      if (!(a.close < b.open || b.close < a.open)) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Which independently-renamable scope(s) a name's declaration(s)
+ * belong to — see `blockScopeTree`. `null` means Global (visible
+ * everywhere: true globals, struct/function names, and —
+ * conservatively — any name whose declaration pattern matches in
+ * scopes that aren't mutually disjoint, since this pass doesn't track
+ * *which* of several same-named declarations a given use refers to). A
+ * non-null array of more than one index means the exact same spelling
+ * was independently declared in more than one scope, only ever
+ * collected here once `mutuallyDisjoint` has confirmed none of those
+ * scopes is nested inside another (two disjoint `for(int i=0;...)`
+ * loops in the same function are the common case this exists for —
+ * ROADMAP.md Phase 1.3).
+ */
+type Scope = number[] | null;
 
 export interface RenamableDecl {
   name: string;
@@ -502,12 +612,17 @@ function findRenamable(tokens: Token[]): RenamableDecl[] {
   const firstSeen = new Map<string, number>();
   const structBodies = structBodyRanges(tokens);
   const preprocNames = preprocReferencedNames(tokens);
-  const functionScopes = functionScopeRanges(tokens);
-  // Every scope a name's declaration pattern matched in. More than one
-  // distinct scope (or a global alongside any local) means we can't
-  // tell which use belongs to which declaration site, so it's treated
-  // as Global — the always-safe fallback.
-  const scopesSeen = new Map<string, Set<Scope>>();
+  const blockScopes = blockScopeTree(tokens);
+  // Every scope a name's declaration pattern matched in (a single
+  // per-occurrence tag: the innermost scope index, or null for true
+  // top-level). More than one distinct tag usually means we can't tell
+  // which use belongs to which declaration site, so it's treated as
+  // Global — the always-safe fallback — *unless* every one of those
+  // scopes turns out to be mutually disjoint (ROADMAP.md Phase 1.3:
+  // e.g. the same `int i` counter declared independently in two
+  // separate, non-overlapping `for` loops), in which case it can still
+  // be kept Local across all of them.
+  const scopesSeen = new Map<string, Set<number | null>>();
 
   tokens.forEach((t, idx) => {
     if (t.kind === "ident") {
@@ -527,15 +642,21 @@ function findRenamable(tokens: Token[]): RenamableDecl[] {
       !BUILTIN_VARIABLES.has(b.text) &&
       !PROTECTED_HOST_NAMES.has(b.text);
     if (aIsType && bIsUser && !strictlyInsideAny(i + 1, structBodies) && !preprocNames.has(b.text)) {
-      const fnIdx = functionScopes.findIndex(([s, e]) => i + 1 > s && i + 1 < e);
-      const tag: Scope = fnIdx === -1 ? null : fnIdx;
+      const scopeIdx = innermostScope(i + 1, blockScopes);
+      const tag: number | null = scopeIdx === -1 ? null : scopeIdx;
       if (!scopesSeen.has(b.text)) scopesSeen.set(b.text, new Set());
       scopesSeen.get(b.text)!.add(tag);
     }
   }
 
   const list: RenamableDecl[] = Array.from(scopesSeen.entries()).map(([name, tags]) => {
-    const scope: Scope = tags.size === 1 ? Array.from(tags)[0] : null;
+    const tagList = Array.from(tags);
+    const allLocal = tagList.every((t) => t !== null);
+    let scope: Scope = null;
+    if (allLocal) {
+      const indices = (tagList as number[]).slice().sort((a, b) => a - b);
+      if (mutuallyDisjoint(indices, blockScopes)) scope = indices;
+    }
     return { name, scope };
   });
 
@@ -2390,43 +2511,56 @@ export function golf(
   // preprocessor substitutes it textually wherever it's spelled.
   for (const n of preprocReferencedNames(tokens)) taken.add(n);
 
-  // Scope-aware assignment: `taken` holds names visible *everywhere*
-  // (keywords/builtins/protected/untouched-originals plus every
-  // already-assigned Global name), while `localTaken.get(i)` holds
-  // names already claimed within function scope `i` alone. Two locals
-  // in *different* function scopes never conflict — `for(int i...)` in
-  // one function and `for(int i...)` in a completely unrelated one can
-  // both become `for(int a...)` — so each scope gets its own fresh
-  // a,b,c... search rather than sharing one ever-growing sequence
-  // across the whole file. Declarations are still assigned in frequency
-  // order across *all* scopes together (that ordering comes from
-  // findRenamable), so a hot local still outranks a rarely-used global
-  // for the shortest names — only the pool of candidates each one draws
-  // from is scope-partitioned.
+  // Scope-aware assignment (ROADMAP.md Phase 1.3): `taken` holds names
+  // visible *everywhere* (keywords/builtins/protected/untouched-
+  // originals plus every already-assigned Global name), while
+  // `localTaken.get(i)` holds names already claimed within block scope
+  // `i` alone (see `blockScopeTree` — a scope here is any `{...}`, not
+  // just a function body). A Local candidate must avoid this candidate
+  // wherever it's already used by any scope that isn't *mutually
+  // disjoint* from it (checked via `mutuallyDisjoint` against every
+  // scope decided so far, not just an ancestor walk: assignment order is
+  // frequency-driven, not tree order, so a nested scope — a `for` loop's
+  // own counter, say — can easily be decided *before* the outer scope
+  // it's nested inside, and an ancestors-only check would miss that the
+  // outer scope's variable is visible throughout the inner scope
+  // regardless of which one got assigned first — mirrors the identical,
+  // real bug fix in `golfer.rs`). It never needs to avoid a genuinely
+  // unrelated sibling/cousin scope's names — `for(int i...)` in one `if`
+  // branch and `for(int i...)` in a disjoint `else` branch (or a
+  // different function entirely) can both become `for(int a...)`, which
+  // is exactly the reuse this scope-partitioning is for. Declarations
+  // are still assigned in frequency order across *all* scopes together
+  // (that ordering comes from findRenamable), so a hot local still
+  // outranks a rarely-used global for the shortest names — only the pool
+  // of candidates each one draws from is scope-partitioned.
+  const blockScopes = blockScopeTree(tokens);
   const localTaken = new Map<number, Set<string>>();
   const renameMap = new Map<string, string>();
   for (const { name, scope } of renamable) {
     const gen = nameGenerator();
     for (;;) {
       const candidate = gen.next().value as string;
-      // A Global name is visible from *inside* every function too
+      // A Global name is visible from *inside* every scope too
       // (including, notably, a function's own name being visible within
       // its own body — e.g. for recursion), so assigning one must avoid
-      // every scope's local names, not just other globals. A Local name
-      // only needs to avoid globals and its own function's other
-      // locals — a *different* function's locals are never visible
-      // here, which is exactly the reuse this scope-partitioning is for.
+      // every scope's local names, not just other globals.
       const collides =
         taken.has(candidate) ||
         (scope === null
           ? Array.from(localTaken.values()).some((s) => s.has(candidate))
-          : (localTaken.get(scope)?.has(candidate) ?? false));
+          : Array.from(localTaken.entries()).some(
+              ([otherIdx, names]) =>
+                names.has(candidate) && scope.some((idx) => !mutuallyDisjoint([idx, otherIdx], blockScopes)),
+            ));
       if (collides) continue;
       if (scope === null) {
         taken.add(candidate);
       } else {
-        if (!localTaken.has(scope)) localTaken.set(scope, new Set());
-        localTaken.get(scope)!.add(candidate);
+        for (const idx of scope) {
+          if (!localTaken.has(idx)) localTaken.set(idx, new Set());
+          localTaken.get(idx)!.add(candidate);
+        }
       }
       renameMap.set(name, candidate);
       break;

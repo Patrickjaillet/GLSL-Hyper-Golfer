@@ -1,7 +1,8 @@
 {
-  "totalBytes": 4050,
+  "totalBytes": 4298,
   "perFixture": {
     "already_broken.glsl": 68,
+    "block_scope_renaming.glsl": 248,
     "braces.glsl": 219,
     "compound_assign.glsl": 76,
     "constant_folding.glsl": 330,

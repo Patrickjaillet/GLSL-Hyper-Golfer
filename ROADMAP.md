@@ -483,16 +483,78 @@ aller plus vite.
       beaucoup plus loin.
 
 ### 1.3 Renommage — pousser la portée plus loin
-- [ ] (P1) **Renommage au niveau du bloc, pas seulement de la
-      fonction.** Le modèle de portée actuel (`function_scope_ranges`)
-      est granularité-fonction : deux `{}` imbriqués différents dans
-      la même fonction ne peuvent aujourd'hui pas réutiliser un nom
-      court même si leurs durées de vie ne se chevauchent jamais.
-      Descendre à la granularité du bloc (`{}` interne, pas seulement
-      le corps de fonction) libère des noms courts supplémentaires
-      pour les grandes fonctions à blocs multiples — le gain croît
-      avec la taille du shader, donc particulièrement utile pour les
-      gros projets multi-buffers.
+- [x] (P1) **Renommage au niveau du bloc, pas seulement de la
+      fonction.** `function_scope_ranges` remplacé par
+      `block_scope_tree` (`golfer.rs`, miroir TS `blockScopeTree`) : au
+      lieu de ne connaître que le corps de chaque fonction, calcule
+      l'arbre complet de tous les `{...}` imbriqués à n'importe quelle
+      profondeur (corps de `if`/`for`/`while`/`do`, ou bloc nu) — un
+      `for(int i=...)` étend sa propre portée pour inclure son
+      en-tête, exactement comme `extend_left_to_params` le faisait déjà
+      pour les paramètres de fonction, appliqué récursivement à
+      n'importe quelle profondeur plutôt qu'au seul niveau supérieur.
+      `Scope::Local` devient `Local(Vec<usize>)` (avant : un seul
+      indice de fonction) : deux déclarations de la **même** orthographe
+      dans des portées **mutuellement disjointes** (`mutually_disjoint`
+      — aucune ne contient l'autre, testé par comparaison de bornes,
+      pas d'analyse de chevauchement générale nécessaire puisqu'un
+      arbre de blocs propre n'a jamais de chevauchement partiel)
+      peuvent maintenant partager le même nouveau nom court — l'exemple
+      moteur de l'item (`tempResult` dans un `if`, `otherThing` dans le
+      `else` disjoint) fonctionne, mais aussi un gain plus large et
+      plus fréquent en pratique : la **même** orthographe réutilisée
+      (typiquement un compteur de boucle `i`) dans deux `for` disjoints
+      de la même fonction, ou un même nom de paramètre générique (`x`,
+      `p`) répété dans plusieurs fonctions indépendantes — ce dernier
+      cas était déjà silencieusement raté par l'ancien modèle
+      (silencieusement forcé en Global dès que 2+ déclarations
+      distinctes existaient, quel que soit leur niveau) et se golfe
+      maintenant correctement en Local partagé.
+      **Un vrai bug trouvé par test manuel, pas seulement raisonné à
+      l'avance, et qui aurait cassé des shaders réels s'il n'avait pas
+      été attrapé** : la première version ne vérifiait la collision
+      qu'en remontant la chaîne des ANCÊTRES d'une portée — mais
+      l'ordre d'assignation des noms est piloté par la fréquence
+      d'usage, pas par l'ordre de l'arbre, donc une portée DESCENDANTE
+      (le compteur `i` d'une boucle `for`) peut très bien être décidée
+      *avant* la portée ANCÊTRE qui la contient (l'accumulateur `s` de
+      la fonction) — vérifier seulement "mes ancêtres ont-ils déjà ce
+      nom" ne voit jamais ce que ses propres DESCENDANTS ont déjà pris.
+      Résultat concret avant correction : `float s=0.;for(int
+      i=0;...){s+=...;}for(int i=0;...){s+=...;}` golfait en `float
+      a=0.;for(int a=0;...)a+=...;for(int a=0;...)a+=...;` — `s` et le
+      compteur de boucle `i` fusionnés sous le **même** nouveau nom, une
+      vraie collision entre deux variables différentes. Corrigé en
+      vérifiant la disjonction mutuelle contre **toutes** les portées
+      déjà décidées à ce stade (pas seulement les ancêtres), ce qui
+      fonctionne quel que soit l'ordre de traitement.
+      6 nouveaux tests Rust dédiés (réutilisation à travers un if/else
+      disjoint, réutilisation d'un compteur de boucle à travers deux
+      `for` disjoints, régression explicite de la collision
+      ancêtre/descendant ci-dessus, refus de réutiliser à travers une
+      vraie chaîne d'imbrication à 3 niveaux, réutilisation à travers
+      trois blocs frères disjoints) + fixture dédiée
+      `block_scope_renaming.glsl` + 2 tests préexistants mis à jour (pas
+      des régressions : le renommage est maintenant meilleur — un nom
+      de paramètre partagé entre deux fonctions indépendantes libère
+      une lettre courte pour `mainImage` lui-même, changement de sortie
+      attendu et vérifié). Parité Rust/TS/wasm 46/46, `cargo
+      test`/`cargo clippy` (×2) propres, budget de taille (Phase 0) :
+      **4050 → 4298 octets** (nouvelle fixture, pas une régression sur
+      l'existant — plusieurs fixtures existantes golfent en réalité
+      *mieux* qu'avant grâce à la réutilisation de paramètres à travers
+      les fonctions, confirmé absence de régression individuelle par
+      `golf-size-budget.mjs`). Suite web complète vérifiée — verte,
+      mais **budget de bundle wasm gzippé désormais critique** : ~76.0
+      → ~78.6 KiB sur un budget CI de 80 KiB (marge restante ~3.3 KiB,
+      **~4%**). Le prochain changement qui ajoute ne serait-ce qu'un peu
+      de code fera probablement échouer la CI. **Action requise avant
+      de poursuivre cette roadmap** : soit relever le budget CI
+      (`wasm_budget` dans `.github/workflows/ci.yml`), soit investir du
+      temps à réduire la taille du binaire wasm lui-même (`wasm-opt`
+      niveau plus agressif, `panic = "abort"`, `opt-level = "z"`,
+      `codegen-units = 1`, etc. — non exploré ici, hors du périmètre de
+      cet item spécifique).
 - [ ] (P2) **Réutilisation d'un paramètre de fonction comme variable de
       travail** (évite de déclarer une nouvelle locale quand un
       paramètre n'est plus lu après un certain point) — nécessite la
