@@ -436,8 +436,29 @@ impl AggressiveOptions {
 /// layout, then whichever `aggressive` structural passes are turned on
 /// (`AggressiveOptions::all()`/`::none()` for the common all-or-nothing
 /// cases — see `golf()`, the simpler boolean-flag entry point most
-/// callers want).
+/// callers want). Equivalent to `golf_with_protected_names` with an
+/// empty protected-names list.
 pub fn golf_with_options(source: &str, aggressive: AggressiveOptions) -> GolfResult {
+    golf_with_protected_names(source, aggressive, &[])
+}
+
+/// Same as `golf_with_options`, plus a caller-supplied list of
+/// identifiers that must never be renamed — e.g. a custom uniform a
+/// host application binds by name, which isn't one of the fixed
+/// Shadertoy uniforms already in `protected_host_names` and would
+/// otherwise be renamed like any other identifier, silently breaking
+/// that binding. A name here is filtered out of `renamable` right
+/// away, which handles both halves of "never rename this" for free:
+/// it's excluded from the rename-assignment loop below, *and* the
+/// existing "protect every identifier the source already uses" sweep
+/// (a few lines down) automatically adds its spelling to `taken` once
+/// it's no longer present in `renamable_set` — no separate code path
+/// needed for that second half.
+pub fn golf_with_protected_names(
+    source: &str,
+    aggressive: AggressiveOptions,
+    protected_names: &[String],
+) -> GolfResult {
     let input_chars = source.chars().count();
     let spaced = tokenize_spaced(source);
     let tokens: Vec<Tok> = spaced.iter().map(|(t, _)| t.clone()).collect();
@@ -448,7 +469,11 @@ pub fn golf_with_options(source: &str, aggressive: AggressiveOptions) -> GolfRes
     let builtin_vars = builtin_variables();
     let protected = protected_host_names();
 
-    let renamable = find_renamable(&tokens);
+    let protected_names_set: HashSet<&str> = protected_names.iter().map(|s| s.as_str()).collect();
+    let renamable: Vec<(String, Scope)> = find_renamable(&tokens)
+        .into_iter()
+        .filter(|(name, _)| !protected_names_set.contains(name.as_str()))
+        .collect();
 
     let mut taken: HashSet<String> = HashSet::new();
     taken.extend(kw.iter().map(|s| s.to_string()));
@@ -731,6 +756,8 @@ fn layout(items: &[Item]) -> String {
 #[cfg(test)]
 mod tests {
     use super::golf;
+    use super::golf_with_protected_names;
+    use super::AggressiveOptions;
 
     #[test]
     fn safe_mode_unchanged_by_default() {
@@ -1264,6 +1291,32 @@ mod tests {
             r.code,
             "#define a 3.0\n#define TAU (2.0*a)\nvoid mainImage(out vec4 b,in vec2 d){float c=1.;b=vec4(c+TAU);}"
         );
+    }
+
+    #[test]
+    fn protected_names_are_never_renamed() {
+        // A custom uniform a host app binds by name — not one of the
+        // fixed Shadertoy uniforms, so nothing protects it by default.
+        let r = golf_with_protected_names(
+            "uniform float uSpeed;void mainImage(out vec4 fragColor,in vec2 fragCoord){fragColor=vec4(uSpeed);}",
+            AggressiveOptions::none(),
+            &["uSpeed".to_string()],
+        );
+        assert!(r.code.contains("uSpeed"), "protected name must survive verbatim: {}", r.code);
+    }
+
+    #[test]
+    fn protected_names_also_reserve_the_spelling_from_reuse() {
+        // Protecting `keep` must also stop some *other* variable from
+        // being renamed *to* "keep" -- otherwise two different
+        // variables would end up declared under the same name.
+        let r = golf_with_protected_names(
+            "uniform float keep;void mainImage(out vec4 fragColor,in vec2 fragCoord){float longLocalName=1.0;fragColor=vec4(keep+longLocalName);}",
+            AggressiveOptions::none(),
+            &["keep".to_string()],
+        );
+        assert!(!r.code.contains("float keep="), "the spelling \"keep\" must never be handed to a different variable: {}", r.code);
+        assert!(r.code.contains("keep"), "the protected uniform must still appear under its own name: {}", r.code);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use glsl_golf_core::{golf, golf_with_options, AggressiveOptions, GolfResult};
+use glsl_golf_core::{golf_with_protected_names, AggressiveOptions, GolfResult};
 use std::env;
 use std::fs;
 use std::io::{self, Read};
@@ -40,6 +40,11 @@ OPTIONS:
     --watch                 Re-run on every change to FILE (requires a
                              FILE argument — not compatible with stdin).
                              Polls every 300ms; stop with Ctrl+C.
+    --protect NAMES          Comma-separated identifiers to never rename
+                             (e.g. custom uniforms a host app binds by
+                             name). Applies in both safe and aggressive
+                             mode -- renaming is part of the always-on
+                             safe pipeline, not an aggressive pass.
     -h, --help              Print this message and exit.
 "#;
 
@@ -76,8 +81,9 @@ fn print_stats(result: &GolfResult, aggressive: bool, to_stdout: bool) {
     }
 }
 
-fn run_golf(source: &str, aggressive: bool, options: AggressiveOptions, diff_only: bool) {
-    let result = if aggressive { golf_with_options(source, options) } else { golf(source, false) };
+fn run_golf(source: &str, aggressive: bool, options: AggressiveOptions, protected: &[String], diff_only: bool) {
+    let effective_options = if aggressive { options } else { AggressiveOptions::none() };
+    let result = golf_with_protected_names(source, effective_options, protected);
     print_stats(&result, aggressive, diff_only);
     if !diff_only {
         println!("{}", result.code);
@@ -100,7 +106,7 @@ fn read_source(args: &[String]) -> Result<String, String> {
 /// dependency (a real filesystem-events crate would be more efficient,
 /// but polling is simple, portable, and plenty responsive for a human
 /// editing a shader file).
-fn run_watch(path: &str, aggressive: bool, options: AggressiveOptions, diff_only: bool) -> ExitCode {
+fn run_watch(path: &str, aggressive: bool, options: AggressiveOptions, protected: &[String], diff_only: bool) -> ExitCode {
     let mut last_modified: Option<SystemTime> = None;
     eprintln!("surveillance de {path} (Ctrl+C pour arreter)...");
     loop {
@@ -109,7 +115,7 @@ fn run_watch(path: &str, aggressive: bool, options: AggressiveOptions, diff_only
                 if last_modified != Some(modified) {
                     last_modified = Some(modified);
                     match fs::read_to_string(path) {
-                        Ok(source) => run_golf(&source, aggressive, options, diff_only),
+                        Ok(source) => run_golf(&source, aggressive, options, protected, diff_only),
                         Err(e) => eprintln!("erreur de lecture de {path}: {e}"),
                     }
                 }
@@ -133,6 +139,7 @@ fn main() -> ExitCode {
 
     let mut aggressive = false;
     let mut options = AggressiveOptions::all();
+    let mut protected: Vec<String> = Vec::new();
     let mut diff_only = false;
     let mut watch = false;
 
@@ -191,6 +198,15 @@ fn main() -> ExitCode {
                 watch = true;
                 args.remove(i);
             }
+            "--protect" => {
+                args.remove(i);
+                if i >= args.len() {
+                    eprintln!("--protect necessite une valeur (liste separee par des virgules)");
+                    return ExitCode::FAILURE;
+                }
+                let value = args.remove(i);
+                protected.extend(value.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()));
+            }
             s if s.starts_with('-') => {
                 eprintln!("option inconnue : {s} (essayez --help)");
                 return ExitCode::FAILURE;
@@ -204,7 +220,7 @@ fn main() -> ExitCode {
             eprintln!("--watch necessite un fichier en argument (pas de lecture depuis stdin)");
             return ExitCode::FAILURE;
         };
-        return run_watch(&path, aggressive, options, diff_only);
+        return run_watch(&path, aggressive, options, &protected, diff_only);
     }
 
     let source = match read_source(&args) {
@@ -214,6 +230,6 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    run_golf(&source, aggressive, options, diff_only);
+    run_golf(&source, aggressive, options, &protected, diff_only);
     ExitCode::SUCCESS
 }

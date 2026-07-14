@@ -20,7 +20,7 @@ mod lexer;
 mod vocab;
 
 pub use aggressive::AggressiveStats;
-pub use golfer::{golf, golf_with_options, AggressiveOptions, GolfResult, GolfStats};
+pub use golfer::{golf, golf_with_options, golf_with_protected_names, AggressiveOptions, GolfResult, GolfStats};
 
 #[cfg(feature = "wasm")]
 mod wasm_api {
@@ -28,25 +28,24 @@ mod wasm_api {
     use wasm_bindgen::prelude::*;
 
     /// Golfs `source` and returns a JSON string: `{"code": "...", "stats": {...}}`.
-    /// `aggressive` is all-or-nothing — see `golf_json_ex` for per-pass control.
+    /// `aggressive` is all-or-nothing — see `golf_json_protected` for
+    /// per-pass control and/or a protected-names list.
     #[wasm_bindgen]
     pub fn golf_json(source: &str, aggressive: bool) -> String {
         let result = golfer::golf(source, aggressive);
         serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
     }
 
-    /// Convenience export returning only the golfed code.
-    #[wasm_bindgen]
-    pub fn golf_code(source: &str, aggressive: bool) -> String {
-        golfer::golf(source, aggressive).code
-    }
-
-    /// Golfs `source` with individually-toggleable aggressive passes —
-    /// backs the UI's per-pass checkboxes. Returns the same JSON shape
-    /// as `golf_json`.
+    /// Golfs `source` with individually-toggleable aggressive passes
+    /// (backs the UI's per-pass checkboxes) plus a comma-separated list
+    /// of identifiers that must never be renamed (custom uniforms a
+    /// host application binds by name, typically) — a single string
+    /// rather than a JS array to keep the wasm-bindgen surface simple,
+    /// matching how a single text input in the UI naturally provides
+    /// this. Returns the same JSON shape as `golf_json`.
     #[allow(clippy::too_many_arguments)]
     #[wasm_bindgen]
-    pub fn golf_json_ex(
+    pub fn golf_json_protected(
         source: &str,
         eliminate_dead_locals: bool,
         eliminate_dead_stores: bool,
@@ -58,6 +57,7 @@ mod wasm_api {
         ternary_from_if_else: bool,
         merge_declarations: bool,
         strip_redundant_braces: bool,
+        protected_names: &str,
     ) -> String {
         let options = AggressiveOptions {
             eliminate_dead_locals,
@@ -71,7 +71,18 @@ mod wasm_api {
             merge_declarations,
             strip_redundant_braces,
         };
-        let result = golfer::golf_with_options(source, options);
+        let names: Vec<String> = protected_names
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        let result = golfer::golf_with_protected_names(source, options, &names);
         serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
+    }
+
+    /// Convenience export returning only the golfed code.
+    #[wasm_bindgen]
+    pub fn golf_code(source: &str, aggressive: bool) -> String {
+        golfer::golf(source, aggressive).code
     }
 }

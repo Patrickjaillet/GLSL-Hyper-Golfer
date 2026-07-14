@@ -531,6 +531,31 @@ button.btn.small {
   cursor: pointer;
 }
 
+.passes-popover-sep {
+  border: none;
+  border-top: 1px solid var(--ink-line);
+  margin: 4px 0;
+}
+
+.protected-names-field {
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 4px !important;
+  cursor: default !important;
+}
+
+.protected-names-field input[type="text"] {
+  cursor: text !important;
+  width: 100%;
+  background: var(--ink);
+  border: 1px solid var(--ink-line);
+  border-radius: var(--radius);
+  color: var(--paper);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 6px;
+}
+
 button.btn {
   font-family: var(--font-mono);
   font-size: 12px;

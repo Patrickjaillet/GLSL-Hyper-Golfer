@@ -89,6 +89,10 @@ const fr: Dict = {
   "pass.trailingReturn.label": "return finaux",
   "pass.trailingReturn.title":
     "Supprime un `return;` sans valeur quand c'est la toute dernière instruction d'une fonction void — équivalent à tomber en fin de fonction. Protégé contre le cas piège `if(x)return;` (corps non accolé d'un if).",
+  "protectedNames.label": "noms protégés",
+  "protectedNames.title":
+    "Identifiants (ex. uniforms custom) à ne jamais renommer — s'applique même en mode sûr, puisque le renommage tourne toujours.",
+  "protectedNames.placeholder": "ex. uSpeed, uColor",
   "channel.none": "aucune",
   "buffer.remove.title": "Retirer ce buffer",
   "buffer.resizer.title": "Glisser pour redimensionner (ou ← →)",
@@ -189,6 +193,10 @@ const en: Dict = {
   "pass.trailingReturn.label": "trailing returns",
   "pass.trailingReturn.title":
     "Removes a valueless `return;` when it's the very last statement of a void function — equivalent to falling off the end. Guarded against the `if(x)return;` trap (an unbraced if's own body).",
+  "protectedNames.label": "protected names",
+  "protectedNames.title":
+    "Identifiers (e.g. custom uniforms) to never rename — applies even in safe mode, since renaming always runs.",
+  "protectedNames.placeholder": "e.g. uSpeed, uColor",
   "channel.none": "none",
   "buffer.remove.title": "Remove this buffer",
   "buffer.resizer.title": "Drag to resize (or ← →)",

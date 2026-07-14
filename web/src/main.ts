@@ -89,6 +89,7 @@ interface SavedProject {
   bufferStates: Partial<Record<BufferSlot, PassState>>;
   imageState: PassState;
   currentTab: BufferId;
+  protectedNames: string;
 }
 
 function isValidChannelWiring(x: unknown): x is ChannelWiring {
@@ -133,8 +134,11 @@ function loadSavedProject(): SavedProject | null {
     const tabIsValid =
       tab === "common" || tab === "image" || (typeof tab === "string" && bufferStates[tab as BufferSlot] !== undefined);
     const currentTab: BufferId = tabIsValid ? (tab as BufferId) : "image";
+    // Optional field, added after the first version of autosave shipped
+    // — an older saved project simply won't have it, treated as "".
+    const protectedNames = typeof parsed.protectedNames === "string" ? parsed.protectedNames : "";
 
-    return { common: parsed.common, bufferStates, imageState: parsed.imageState, currentTab };
+    return { common: parsed.common, bufferStates, imageState: parsed.imageState, currentTab, protectedNames };
   } catch {
     return null;
   }
@@ -142,7 +146,7 @@ function loadSavedProject(): SavedProject | null {
 
 function saveProjectToLocalStorage(): void {
   try {
-    const data: SavedProject = { common, bufferStates, imageState, currentTab };
+    const data: SavedProject = { common, bufferStates, imageState, currentTab, protectedNames: protectedNamesInput.value };
     localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(data));
   } catch {
     // Storage full or unavailable (private browsing, quota) — autosave
@@ -158,11 +162,17 @@ function scheduleAutosave(): void {
 }
 
 const savedProject = loadSavedProject();
+// Applied to the actual <input> once it exists (queried much further
+// down, alongside the rest of the DOM element lookups) — the plain
+// project-state globals above can be reassigned directly at this point
+// in the module, but there's no DOM to touch yet this early.
+let restoredProtectedNames = "";
 if (savedProject) {
   common = savedProject.common;
   bufferStates = savedProject.bufferStates;
   imageState = savedProject.imageState;
   currentTab = savedProject.currentTab;
+  restoredProtectedNames = savedProject.protectedNames;
 }
 
 function activeSlots(): BufferSlot[] {
@@ -337,6 +347,11 @@ app.innerHTML = `
       <label data-i18n-title="pass.trailingReturn.title" title="">
         <input type="checkbox" id="pass-trailing-return" checked /><span data-i18n="pass.trailingReturn.label">return finaux</span>
       </label>
+      <hr class="passes-popover-sep" />
+      <label class="protected-names-field" data-i18n-title="protectedNames.title" title="">
+        <span data-i18n="protectedNames.label">noms protégés</span>
+        <input type="text" id="protected-names-input" data-i18n-placeholder="protectedNames.placeholder" placeholder="" />
+      </label>
     </div>
   </div>
 `;
@@ -350,6 +365,9 @@ function applyTranslations(): void {
   });
   document.querySelectorAll<HTMLElement>("[data-i18n-aria-label]").forEach((el) => {
     el.setAttribute("aria-label", t(el.dataset.i18nAriaLabel!));
+  });
+  document.querySelectorAll<HTMLInputElement>("[data-i18n-placeholder]").forEach((el) => {
+    el.placeholder = t(el.dataset.i18nPlaceholder!);
   });
   langToggle.textContent = getLocale() === "fr" ? "EN" : "FR";
   renderBufferTabs();
@@ -407,6 +425,8 @@ const passCheckboxes = [
   passBraces,
   passTrailingReturn,
 ];
+const protectedNamesInput = document.getElementById("protected-names-input") as HTMLInputElement;
+protectedNamesInput.value = restoredProtectedNames;
 const passesBtn = document.getElementById("passes-btn") as HTMLButtonElement;
 const passesPopover = document.getElementById("passes-popover") as HTMLElement;
 const importBtn = document.getElementById("import-btn") as HTMLButtonElement;
@@ -987,12 +1007,20 @@ function updateLegacyWarnings(): void {
   warningBanner.textContent = legacyWarnings.join("\n");
 }
 
+function currentProtectedNames(): string[] {
+  return protectedNamesInput.value
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
 function golfProject(): void {
   const options = currentAggressiveOptions();
+  const protectedNames = currentProtectedNames();
   const passes = compilablePasses();
   lastResults = {};
   for (const p of passes) {
-    lastResults[p.id] = golfImpl(common + "\n" + p.state.code, options);
+    lastResults[p.id] = golfImpl(common + "\n" + p.state.code, options, protectedNames);
   }
   renderOutput();
   updateLegacyWarnings();
@@ -1095,10 +1123,19 @@ passCheckboxes.forEach((cb) =>
     golfProject();
   }),
 );
+let protectedNamesTimer: ReturnType<typeof setTimeout> | undefined;
+protectedNamesInput.addEventListener("input", () => {
+  if (protectedNamesTimer !== undefined) clearTimeout(protectedNamesTimer);
+  protectedNamesTimer = setTimeout(() => {
+    golfProject();
+    scheduleAutosave();
+  }, 400);
+});
 resetBtn.addEventListener("click", () => {
   common = "";
   bufferStates = {};
   imageState = { code: DEFAULT_IMAGE_CODE, channels: emptyChannels() };
+  protectedNamesInput.value = "";
   switchTab("image");
   golfProject();
 });

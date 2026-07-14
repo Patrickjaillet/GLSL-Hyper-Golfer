@@ -13,8 +13,8 @@
  * shape directly, with no manual field-mapping layer to drift out of
  * sync.
  */
-import init, { golf_json, golf_json_ex } from "./wasm-pkg/glsl_golf_core.js";
-import type { AggressiveOptions, GolfResult } from "./golfer";
+import init, { golf_json, golf_json_protected } from "./wasm-pkg/glsl_golf_core.js";
+import { allAggressiveOptions, type AggressiveOptions, type GolfResult } from "./golfer";
 
 let ready: Promise<void> | null = null;
 
@@ -28,26 +28,34 @@ export function initWasmGolfer(): Promise<void> {
 
 /**
  * Synchronous drop-in for golfer.ts's `golf()` — only call after
- * `initWasmGolfer()` has resolved. A plain boolean uses the simpler
- * `golf_json` wasm export; per-pass `AggressiveOptions` uses
- * `golf_json_ex`, which backs the UI's individual checkboxes.
+ * `initWasmGolfer()` has resolved. The common case (plain boolean, no
+ * protected names) uses the simpler `golf_json` wasm export; per-pass
+ * `AggressiveOptions` and/or a non-empty `protectedNames` use
+ * `golf_json_protected`, which backs both the UI's individual
+ * checkboxes and the protected-names field.
  */
-export function wasmGolf(source: string, aggressive: boolean | AggressiveOptions = false): GolfResult {
-  const json =
-    typeof aggressive === "boolean"
-      ? golf_json(source, aggressive)
-      : golf_json_ex(
-          source,
-          aggressive.eliminateDeadLocals,
-          aggressive.eliminateDeadStores,
-          aggressive.foldConstants,
-          aggressive.reduceConstantVectors,
-          aggressive.stripTrailingVoidReturn,
-          aggressive.compoundAssignments,
-          aggressive.incrementDecrement,
-          aggressive.ternaryFromIfElse,
-          aggressive.mergeDeclarations,
-          aggressive.stripRedundantBraces,
-        );
+export function wasmGolf(
+  source: string,
+  aggressive: boolean | AggressiveOptions = false,
+  protectedNames: string[] = [],
+): GolfResult {
+  if (typeof aggressive === "boolean" && protectedNames.length === 0) {
+    return JSON.parse(golf_json(source, aggressive)) as GolfResult;
+  }
+  const options: AggressiveOptions = typeof aggressive === "boolean" ? allAggressiveOptions(aggressive) : aggressive;
+  const json = golf_json_protected(
+    source,
+    options.eliminateDeadLocals,
+    options.eliminateDeadStores,
+    options.foldConstants,
+    options.reduceConstantVectors,
+    options.stripTrailingVoidReturn,
+    options.compoundAssignments,
+    options.incrementDecrement,
+    options.ternaryFromIfElse,
+    options.mergeDeclarations,
+    options.stripRedundantBraces,
+    protectedNames.join(","),
+  );
   return JSON.parse(json) as GolfResult;
 }

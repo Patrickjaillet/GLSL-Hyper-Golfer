@@ -290,9 +290,40 @@ classements), thèmes visuels, et optimisation mobile.
 ### 1.3 Config / API du moteur
 - [ ] Exposer un **niveau de golf réglable** (safe / balanced /
       aggressive / max-risk) plutôt que la simple checkbox actuelle
-- [ ] API `golf_with_options` acceptant une **whitelist de noms à ne
-      jamais renommer** (utile pour les shaders qui exposent des
-      uniforms custom)
+- ✅ **FAIT (14/07/2026) — API acceptant une whitelist de noms à ne
+      jamais renommer.** Nouvelle fonction
+      `golfer::golf_with_protected_names(source, aggressive_options,
+      protected_names)`, `golf_with_options` devenant un simple appel
+      à celle-ci avec une liste vide plutôt qu'un changement de
+      signature des fonctions publiques existantes. Utile dès qu'un
+      shader expose un uniform custom (nom non présent dans la liste
+      figée des uniforms Shadertoy déjà protégés) qu'un binding externe
+      référence par nom — sans ça, le pipeline de renommage *toujours
+      actif* (pas juste le mode agressif) le renomme comme n'importe
+      quel autre identifiant, cassant silencieusement ce binding.
+      **Implémentation minimale par construction** : les noms protégés
+      sont simplement retirés de la liste `renamable` juste après son
+      calcul — ça suffit pour les deux moitiés du problème à la fois
+      (le nom n'est plus jamais choisi comme cible à renommer, *et* le
+      balayage existant "protéger tout identifiant déjà présent dans
+      la source" (ajouté plus tôt cette session pour le bug des macros)
+      le protège désormais aussi de la génération, gratuitement, sans
+      code séparé). 2 tests Rust dédiés + miroir TS (`golf()` accepte
+      un 3e paramètre `protectedNames`) + nouvel export wasm
+      `golf_json_protected` (remplace `golf_json_ex`, devenu redondant
+      — même capacités avec une liste de noms vide) + flag CLI
+      `--protect NAMES` (liste séparée par des virgules) + champ texte
+      dédié dans le popover de passes de l'UI, appliqué même quand
+      "Golf agressif" est désactivé (le renommage n'est pas une passe
+      agressive). Persisté via l'autosave existant (nouveau champ
+      `protectedNames` dans `SavedProject`, rétrocompatible — un projet
+      sauvegardé avant cet ajout est traité comme `""`). Vérifié
+      manuellement (CLI `--protect`), en headless (jetable, supprimé
+      après usage : sans protection un uniform custom est bien
+      renommé, avec protection il survit tel quel et le golf compile
+      toujours, la valeur du champ survit à un rechargement de page)
+      + suite complète (`cargo test`, clippy avec `--features wasm`,
+      parité Rust/TS/wasm 38/38, tsc, eslint, build, e2e) inchangée.
 - ✅ **FAIT (13/07/2026) — Support de plusieurs buffers en une seule
       passe** (voir section 2) — mais **pas** de "renommage cohérent
       inter-fichiers" comme prévu ici à l'origine : il s'est avéré que

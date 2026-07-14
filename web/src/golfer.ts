@@ -1694,13 +1694,18 @@ export function allAggressiveOptions(on: boolean): AggressiveOptions {
  * touch. `aggressive` accepts a plain boolean (all passes on/off, the
  * common case) or an `AggressiveOptions` for per-pass control.
  */
-export function golf(source: string, aggressive: boolean | AggressiveOptions = false): GolfResult {
+export function golf(
+  source: string,
+  aggressive: boolean | AggressiveOptions = false,
+  protectedNames: string[] = [],
+): GolfResult {
   const options: AggressiveOptions =
     typeof aggressive === "boolean" ? allAggressiveOptions(aggressive) : aggressive;
   const inputChars = source.length;
   const tokens = tokenize(source);
 
-  const renamable = findRenamable(tokens);
+  const protectedNamesSet = new Set(protectedNames);
+  const renamable = findRenamable(tokens).filter((r) => !protectedNamesSet.has(r.name));
 
   const taken = new Set<string>([
     ...KEYWORDS,
