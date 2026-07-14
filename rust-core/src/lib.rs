@@ -57,6 +57,7 @@ mod wasm_api {
         ternary_from_if_else: bool,
         merge_declarations: bool,
         strip_redundant_braces: bool,
+        strip_redundant_parens: bool,
         protected_names: &str,
     ) -> String {
         let options = AggressiveOptions {
@@ -70,6 +71,7 @@ mod wasm_api {
             ternary_from_if_else,
             merge_declarations,
             strip_redundant_braces,
+            strip_redundant_parens,
         };
         let names: Vec<String> = protected_names
             .split(',')

@@ -1,7 +1,8 @@
 use crate::aggressive::{
-    compound_assignments, eliminate_dead_locals, eliminate_dead_stores, fold_constants,
-    increment_decrement, merge_declarations, reduce_constant_vectors, strip_redundant_braces,
-    strip_trailing_void_return, ternary_from_if_else, AggressiveStats, Item,
+    compound_assignments, eliminate_dead_locals, eliminate_dead_stores, fold_additive_constants,
+    fold_constants, increment_decrement, merge_declarations, reduce_constant_vectors,
+    strip_redundant_braces, strip_redundant_parens, strip_trailing_void_return, ternary_from_if_else,
+    AggressiveStats, Item,
 };
 use crate::lexer::{tokenize_spaced, Tok};
 use crate::vocab::{
@@ -398,6 +399,7 @@ pub struct AggressiveOptions {
     pub ternary_from_if_else: bool,
     pub merge_declarations: bool,
     pub strip_redundant_braces: bool,
+    pub strip_redundant_parens: bool,
 }
 
 impl AggressiveOptions {
@@ -413,6 +415,7 @@ impl AggressiveOptions {
             ternary_from_if_else: true,
             merge_declarations: true,
             strip_redundant_braces: true,
+            strip_redundant_parens: true,
         }
     }
 
@@ -428,6 +431,7 @@ impl AggressiveOptions {
             ternary_from_if_else: false,
             merge_declarations: false,
             strip_redundant_braces: false,
+            strip_redundant_parens: false,
         }
     }
 }
@@ -601,36 +605,66 @@ pub fn golf_with_protected_names(
         });
     }
 
+    // Run the whole aggressive pipeline to a fixpoint rather than once
+    // through in a fixed order (ROADMAP.md Phase 0): a pass earlier in
+    // the list can only ever benefit from one later in the list within
+    // a single pass-through, never the other way round (e.g. stripping
+    // braces can leave two writes newly adjacent for
+    // `eliminate_dead_stores`, which already ran). Re-running the whole
+    // block until nothing changes catches those cascades for free, no
+    // new golfing logic needed. `AggressiveStats` fields are simple
+    // counters, so accumulating them across iterations (rather than
+    // resetting each round) already gives the right "total across the
+    // whole run" semantics. Hard iteration cap purely as a belt-and-
+    // braces guard against an unforeseen oscillation between two passes
+    // (none is known to exist; every pass is individually
+    // size-non-increasing) rather than looping forever.
+    const MAX_FIXPOINT_ITERATIONS: usize = 10;
     let mut aggressive_stats = AggressiveStats::default();
-    if aggressive.eliminate_dead_locals {
-        items = eliminate_dead_locals(items, &mut aggressive_stats);
-    }
-    if aggressive.eliminate_dead_stores {
-        items = eliminate_dead_stores(items, &mut aggressive_stats);
-    }
-    if aggressive.fold_constants {
-        items = fold_constants(items, &mut aggressive_stats);
-    }
-    if aggressive.reduce_constant_vectors {
-        items = reduce_constant_vectors(items, &mut aggressive_stats);
-    }
-    if aggressive.compound_assignments {
-        items = compound_assignments(items, &mut aggressive_stats);
-    }
-    if aggressive.increment_decrement {
-        items = increment_decrement(items, &mut aggressive_stats);
-    }
-    if aggressive.ternary_from_if_else {
-        items = ternary_from_if_else(items, &mut aggressive_stats);
-    }
-    if aggressive.merge_declarations {
-        items = merge_declarations(items, &mut aggressive_stats);
-    }
-    if aggressive.strip_redundant_braces {
-        items = strip_redundant_braces(items, &mut aggressive_stats);
-    }
-    if aggressive.strip_trailing_void_return {
-        items = strip_trailing_void_return(items, &mut aggressive_stats);
+    for _ in 0..MAX_FIXPOINT_ITERATIONS {
+        let before = items.clone();
+        if aggressive.eliminate_dead_locals {
+            items = eliminate_dead_locals(items, &mut aggressive_stats);
+        }
+        if aggressive.eliminate_dead_stores {
+            items = eliminate_dead_stores(items, &mut aggressive_stats);
+        }
+        if aggressive.fold_constants {
+            items = fold_constants(items, &mut aggressive_stats);
+            // Same toggle, not a separate one: `+`/`-` folding is still
+            // conceptually "constant folding", just a stricter pass than
+            // the `*`/`/`/`%` one above (ROADMAP.md Phase 1.1) — no new
+            // UI checkbox/CLI flag needed for what's really the same
+            // feature getting wider coverage.
+            items = fold_additive_constants(items, &mut aggressive_stats);
+        }
+        if aggressive.reduce_constant_vectors {
+            items = reduce_constant_vectors(items, &mut aggressive_stats);
+        }
+        if aggressive.compound_assignments {
+            items = compound_assignments(items, &mut aggressive_stats);
+        }
+        if aggressive.increment_decrement {
+            items = increment_decrement(items, &mut aggressive_stats);
+        }
+        if aggressive.ternary_from_if_else {
+            items = ternary_from_if_else(items, &mut aggressive_stats);
+        }
+        if aggressive.merge_declarations {
+            items = merge_declarations(items, &mut aggressive_stats);
+        }
+        if aggressive.strip_redundant_braces {
+            items = strip_redundant_braces(items, &mut aggressive_stats);
+        }
+        if aggressive.strip_redundant_parens {
+            items = strip_redundant_parens(items, &mut aggressive_stats);
+        }
+        if aggressive.strip_trailing_void_return {
+            items = strip_trailing_void_return(items, &mut aggressive_stats);
+        }
+        if items == before {
+            break;
+        }
     }
 
     let code = layout(&items);
@@ -825,10 +859,14 @@ mod tests {
         // `a += 1` as a sub-expression evaluates to the *new* value of
         // `a` -- prefix `++a` matches that; postfix `a++` would not, so
         // this pins that the rewrite is prefix, not postfix, even
-        // though both are the same length.
+        // though both are the same length. The surrounding parens are
+        // also stripped: after the rewrite, `(++x)` wraps a single
+        // primary (a prefix unary op plus one identifier), which
+        // `strip_redundant_parens` correctly recognizes as redundant.
         let r = golf("y=(x+=1.0);", true);
-        assert_eq!(r.code, "y=(++x);");
+        assert_eq!(r.code, "y=++x;");
         assert_eq!(r.stats.aggressive.increments_decrements, 1);
+        assert_eq!(r.stats.aggressive.redundant_parens_removed, 1);
     }
 
     #[test]
@@ -1027,12 +1065,110 @@ mod tests {
     }
 
     #[test]
-    fn refuses_to_fold_across_lower_precedence_plus() {
+    fn folds_multiplicative_then_additive_across_the_fixpoint_loop() {
         // `2+3*4` is `2+(3*4)`, not `(2+3)*4` — only the `3*4` (tightest
-        // precedence) is safe to fold; `+` itself is never folded.
+        // precedence) is safe to fold in a single left-to-right scan.
+        // Historically this is where folding stopped entirely (`+` was
+        // never folded at all) — now the Phase 0 fixpoint loop feeds the
+        // `2+12` this produces back into additive folding on the next
+        // iteration, reaching `14` fully rather than leaving a partially
+        // folded expression on the table.
         let r = golf("x=2+3*4;", true);
-        assert_eq!(r.code, "x=2+12;");
-        assert_eq!(r.stats.aggressive.constants_folded, 1);
+        assert_eq!(r.code, "x=14;");
+        assert_eq!(r.stats.aggressive.constants_folded, 2);
+    }
+
+    #[test]
+    fn folds_a_simple_plus_and_minus() {
+        let r = golf("x=1+2;", true);
+        assert_eq!(r.code, "x=3;");
+        let r = golf("x=3-5;", true);
+        assert_eq!(r.code, "x=-2;");
+    }
+
+    #[test]
+    fn folds_an_additive_chain_left_to_right() {
+        let r = golf("x=1+2+3;", true);
+        assert_eq!(r.code, "x=6;");
+        let r = golf("x=3-5+10;", true);
+        assert_eq!(r.code, "x=8;");
+    }
+
+    #[test]
+    fn folds_a_leading_unary_sign_into_the_chain() {
+        let r = golf("x=-5+3;", true);
+        assert_eq!(r.code, "x=-2;");
+    }
+
+    #[test]
+    fn refuses_to_fold_additive_chain_preceded_by_a_variable() {
+        // `x-1+2` is `(x-1)+2` — folding the `1+2` tail alone would
+        // silently turn this into `x-3`, which is wrong whenever `x` is
+        // anything but the specific value that happens to make it not
+        // matter. This exact case corrupted the output entirely
+        // (`c 1` — tokens vanishing) before the boundary check was
+        // fixed to treat a preceding identifier as unsafe, not just a
+        // preceding `+`/`-`/`*`/`/`/`%`.
+        let r = golf("x=y-1+2;", true);
+        assert_eq!(r.code, "x=y-1+2;");
+        assert_eq!(r.stats.aggressive.constants_folded, 0);
+    }
+
+    #[test]
+    fn refuses_to_fold_additive_chain_preceded_by_a_closing_bracket() {
+        // Same reasoning as the variable case above, but for a function
+        // call/array-index result instead of a bare identifier: `f()-1+2`
+        // is `(f()-1)+2`, and the closing `)` is the tell that the `-`
+        // is binary (subtracting from the call's result), not a leading
+        // unary sign starting a fresh chain.
+        let r = golf("x=f()-1+2;", true);
+        assert_eq!(r.code, "x=f()-1+2;");
+        let r = golf("x=a[0]-1+2;", true);
+        assert_eq!(r.code, "x=a[0]-1+2;");
+    }
+
+    #[test]
+    fn refuses_to_fold_across_a_following_tighter_operator_in_additive_chain() {
+        // `1+2*3` is `1+(2*3)` — the `2` must not be folded into `1+2`.
+        // Left alone, the existing `*`/`/`/`%` fold handles `2*3` on its
+        // own, and thanks to the Phase 0 fixpoint loop a later iteration
+        // then folds the now-adjacent `1+6`.
+        let r = golf("x=1+2*3;", true);
+        assert_eq!(r.code, "x=7;");
+        let r = golf("x=1-2*3;", true);
+        assert_eq!(r.code, "x=-5;");
+    }
+
+    #[test]
+    fn refuses_to_fold_a_doubled_unary_sign() {
+        // Unary `-` binds *tighter* than binary `+`, so `- -3+2` is
+        // `(-(-3))+2` = `5`, not `-(-3+2)` = `1`. Treating the second
+        // `-` as a valid unary chain start (it's preceded by the first
+        // `-`) would silently compute the wrong value — declining here
+        // is required for correctness, not just conservative caution.
+        let r = golf("x=- -3+2;", true);
+        assert_eq!(r.code, "x=- -3+2;");
+        assert_eq!(r.stats.aggressive.constants_folded, 0);
+    }
+
+    #[test]
+    fn refuses_to_fold_additive_overflow() {
+        let r = golf("x=2147483647+1;", true);
+        assert_eq!(r.code, "x=2147483647+1;");
+        let r = golf("x=-2147483648-1;", true);
+        assert_eq!(r.code, "x=-2147483648-1;");
+    }
+
+    #[test]
+    fn additive_and_multiplicative_folding_compose_across_the_fixpoint_loop() {
+        // `4*3+2` is `(4*3)+2` = 14: `*` folds first (tightest
+        // precedence), then the now-adjacent `12+2` folds on a later
+        // fixpoint iteration — both increment the same `constants_folded`
+        // counter (additive folding is the same "fold_constants" toggle
+        // widened, not a separate pass/checkbox).
+        let r = golf("x=4*3+2;", true);
+        assert_eq!(r.code, "x=14;");
+        assert_eq!(r.stats.aggressive.constants_folded, 2);
     }
 
     #[test]
@@ -1430,5 +1566,93 @@ mod tests {
         let r = golf("void f(){x=1.0;y=2.0;x=3.0;foo(x,y);}", true);
         assert_eq!(r.code, "void a(){x=1.;y=2.;x=3.;foo(x,y);}");
         assert_eq!(r.stats.aggressive.dead_stores_removed, 0);
+    }
+
+    #[test]
+    fn strips_parens_around_a_single_literal() {
+        let r = golf("void f(){float a=(1.0);foo(a);}", true);
+        assert_eq!(r.code, "void b(){float a=1.;foo(a);}");
+        assert_eq!(r.stats.aggressive.redundant_parens_removed, 1);
+    }
+
+    #[test]
+    fn strips_nested_parens_via_the_fixpoint_loop() {
+        // Each iteration of the fixpoint loop only strips one layer, so
+        // `((1.0))` needs two passes: `(1.0)` -> `1.0` first, then the
+        // now-bare `(1.0)` on the next iteration.
+        let r = golf("void f(){float a=((1.0));foo(a);}", true);
+        assert_eq!(r.code, "void b(){float a=1.;foo(a);}");
+        assert_eq!(r.stats.aggressive.redundant_parens_removed, 2);
+    }
+
+    #[test]
+    fn refuses_parens_around_more_than_one_primary() {
+        // `scan_primary` only consumes a single primary expression, so
+        // it stops at `1.0` while the closing `)` is after `+2.0` --
+        // the mismatch means the parens are load-bearing and must stay.
+        let r = golf("void f(){float a=(1.0+2.0);foo(a);}", true);
+        assert_eq!(r.code, "void b(){float a=(1.+2.);foo(a);}");
+        assert_eq!(r.stats.aggressive.redundant_parens_removed, 0);
+    }
+
+    #[test]
+    fn refuses_a_real_function_calls_parens() {
+        // Preceded by an identifier (`vec3`), so this is a call, not a
+        // grouping paren -- must never be touched. The *inner* redundant
+        // parens around the single argument still get stripped though.
+        let r = golf("void f(){vec3 a=vec3((1.0));foo(a);}", true);
+        assert_eq!(r.code, "void b(){vec3 a=vec3(1.);foo(a);}");
+        assert_eq!(r.stats.aggressive.redundant_parens_removed, 1);
+    }
+
+    #[test]
+    fn refuses_a_control_flow_keywords_mandatory_parens() {
+        // `if` tokenizes as the same `Tok::Ident` variant as any other
+        // identifier, so the "preceded by an identifier" exclusion also
+        // protects `if(...)`'s parens for free -- even though the inner
+        // `(true)` is itself a redundant single-primary paren that gets
+        // stripped by a separate, unrelated match.
+        let r = golf("void f(){if((true)){foo();}}", true);
+        assert_eq!(r.code, "void a(){if(true)foo();}");
+        assert_eq!(r.stats.aggressive.redundant_parens_removed, 1);
+    }
+
+    #[test]
+    fn refuses_parens_around_a_binary_expression_used_as_an_operand() {
+        let r = golf("void f(){float a=(x+y)*2.0;foo(a);}", true);
+        assert_eq!(r.code, "void b(){float a=(x+y)*2.;foo(a);}");
+        assert_eq!(r.stats.aggressive.redundant_parens_removed, 0);
+    }
+
+    #[test]
+    fn preserves_a_disambiguating_space_after_stripping_parens_around_a_unary_minus() {
+        // Regression test: deleting the `(` used to leave the `-` from
+        // `5.-` textually adjacent to the unary `-` that was originally
+        // right after `(` with no space (`(-x)`), producing `5.--x` --
+        // indistinguishable from (or at least confusable with) the
+        // decrement operator. The fix forces `space_before` on the
+        // first re-emitted inner token so `layout()`'s ambiguous-pair
+        // guard actually runs and inserts the disambiguating space.
+        let r = golf("void f(){float x=1.0;float a;a=5.0-(-x);foo(a);}", true);
+        assert_eq!(r.code, "void c(){float b=1.,a;a=5.- -b;foo(a);}");
+        assert_eq!(r.stats.aggressive.redundant_parens_removed, 1);
+    }
+
+    #[test]
+    fn preserves_a_disambiguating_space_after_stripping_parens_around_a_unary_plus() {
+        let r = golf("void f(){float x=1.0;float a;a=5.0+(+x);foo(a);}", true);
+        assert_eq!(r.code, "void c(){float b=1.,a;a=5.+ +b;foo(a);}");
+        assert_eq!(r.stats.aggressive.redundant_parens_removed, 1);
+    }
+
+    #[test]
+    fn does_not_force_an_unnecessary_space_when_no_fusion_risk_exists() {
+        // `*` immediately followed by `-` never forms an ambiguous pair
+        // (there's no `*-` operator to be confused with), so forcing
+        // `space_before` on the re-emitted token must not itself cause
+        // an unwanted space to appear.
+        let r = golf("void f(){float x=1.0;float a;a=5.0*(-x);foo(a);}", true);
+        assert_eq!(r.code, "void c(){float b=1.,a;a=5.*-b;foo(a);}");
+        assert_eq!(r.stats.aggressive.redundant_parens_removed, 1);
     }
 }

@@ -1,0 +1,25 @@
+{
+  "totalBytes": 3657,
+  "perFixture": {
+    "already_broken.glsl": 68,
+    "braces.glsl": 220,
+    "compound_assign.glsl": 76,
+    "constant_folding.glsl": 255,
+    "constant_vectors.glsl": 189,
+    "dead_locals.glsl": 115,
+    "dead_stores.glsl": 161,
+    "declaration_heuristic.glsl": 117,
+    "declarations.glsl": 15,
+    "define_safety.glsl": 96,
+    "fractal.glsl": 495,
+    "increment_decrement.glsl": 160,
+    "macro_only_reference.glsl": 97,
+    "numbers_and_ambiguity.glsl": 149,
+    "parens.glsl": 195,
+    "scope_aware_renaming.glsl": 147,
+    "struct_safety.glsl": 180,
+    "swizzle_after_dot.glsl": 454,
+    "ternary_from_if_else.glsl": 251,
+    "trailing_void_return.glsl": 217
+  }
+}

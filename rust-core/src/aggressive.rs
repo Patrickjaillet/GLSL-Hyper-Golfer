@@ -11,7 +11,7 @@ use crate::lexer::Tok;
 use crate::vocab::type_keywords;
 use std::collections::HashMap;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct Item {
     pub tok: Tok,
     pub text: String,
@@ -31,6 +31,7 @@ pub struct AggressiveStats {
     pub trailing_void_returns_removed: usize,
     pub increments_decrements: usize,
     pub ternaries_from_if_else: usize,
+    pub redundant_parens_removed: usize,
 }
 
 fn is_unary_prefix(c: char) -> bool {
@@ -355,12 +356,15 @@ fn scan_primary(items: &[Item], start: usize) -> Option<usize> {
 // Integers have no such problem (GLSL `int` is exact 32-bit two's
 // complement, and so is the arithmetic below).
 //
-// `+`/`-` are also skipped: unlike `*`/`/`/`%` (already the tightest
-// arithmetic precedence in GLSL, so folding them can never change how
-// an expression groups), folding a `+`/`-` pair would require checking
-// that neither neighbour is a `*`/`/`/`%` about to claim one of the
-// operands first (`2+3*4` is `2+(3*4)`, not `(2+3)*4`) — a precedence
-// analysis this pass doesn't do, so it declines rather than risk it.
+// `+`/`-` are deliberately not handled by *this* function: unlike
+// `*`/`/`/`%` (already the tightest arithmetic precedence in GLSL, so
+// folding them can never change how an expression groups), folding a
+// `+`/`-` pair requires checking that neither neighbour is a `*`/`/`/`%`
+// about to claim one of the operands first (`2+3*4` is `2+(3*4)`, not
+// `(2+3)*4`) — a real precedence analysis, which is why it lives in its
+// own function below (`fold_additive_constants`, ROADMAP.md Phase 1.1)
+// with its own, stricter safety argument rather than being folded into
+// this simpler left-to-right scan.
 // ---------------------------------------------------------------------
 
 const FOLDABLE_OPS: &[char] = &['*', '/', '%'];
@@ -454,6 +458,177 @@ pub fn fold_constants(items: Vec<Item>, stats: &mut AggressiveStats) -> Vec<Item
         i += 1;
     }
     out
+}
+
+/// Evaluates `a + b` or `a - b` with the same GLSL `int` (32-bit signed)
+/// semantics/overflow guard as `fold_int_op` — see there for why folding
+/// declines rather than guesses on overflow.
+fn fold_additive_op(a: i64, op: char, b: i64) -> Option<i64> {
+    let result = match op {
+        '+' => a.checked_add(b)?,
+        '-' => a.checked_sub(b)?,
+        _ => return None,
+    };
+    if result < i32::MIN as i64 || result > i32::MAX as i64 {
+        return None;
+    }
+    Some(result)
+}
+
+/// Is the token at `idx` (or "no token", meaning start of file/statement)
+/// a safe boundary for an additive chain to *start* right after it? Used
+/// identically whether the chain's first token is a bare number (case A)
+/// or a leading unary sign (case B) — which is exactly why an `Ident`/
+/// `Number`/`)`/`]` immediately before must count as *unsafe* here even
+/// though case A alone could never actually encounter one (two primaries
+/// can't be textually adjacent in valid GLSL without an operator between
+/// them): for case B, that same token is the tell that a `+`/`-` right
+/// after it is *binary*, not unary — `x-1+2` must decline exactly the
+/// same way `2+3*4` declines for `fold_constants`, and treating "an
+/// identifier/number/closing bracket precedes it" as safe was a real bug
+/// caught by manual testing (`x-1+2` corrupted into invalid GLSL before
+/// this fix), not a hypothetical.
+fn additive_chain_boundary_ok(items: &[Item], idx: Option<usize>) -> bool {
+    match idx.and_then(|i| items.get(i)).map(|it| &it.tok) {
+        None => true,
+        Some(Tok::Punct(c)) => !matches!(c, '*' | '/' | '%' | '+' | '-' | ')' | ']'),
+        _ => false, // Ident/Number directly before: a real operand, so a following +/- is binary, not a safe chain start.
+    }
+}
+
+/// Extends an additive chain starting at the number token `first_num_idx`
+/// (already known to be a plain int, contributing `leading_sign * value`)
+/// through as many further `(+|-) <int>` terms as it safely can, and
+/// returns `(end_index, folded_value)` if at least 2 terms were combined
+/// — folding a lone number "chain" would be a no-op, not a golf.
+///
+/// A candidate next term is only consumed if the token *after* it isn't
+/// `*`/`/`/`%` — otherwise that number is about to be claimed as the left
+/// operand of a tighter multiplication/division/modulo (`1+2*3` is
+/// `1+(2*3)`, so the `2` must not be folded into `1+2`), and this pass
+/// stops the chain right before it instead. Left unfolded that way,
+/// nothing is lost long-term: `fold_constants` (run in the same fixpoint
+/// loop — ROADMAP.md Phase 0) folds `2*3` on its own, and a later
+/// fixpoint iteration of this function then folds the now-adjacent `1+6`.
+fn try_extend_additive_chain(items: &[Item], first_num_idx: usize, leading_sign: i64) -> Option<(usize, i64)> {
+    let first_raw = match &items[first_num_idx].tok {
+        Tok::Number(raw) => raw,
+        _ => return None,
+    };
+    let mut value = leading_sign * parse_plain_int(first_raw)?;
+    let mut i = first_num_idx + 1;
+    let mut terms = 1;
+    while let Some(Tok::Punct(op @ ('+' | '-'))) = items.get(i).map(|it| &it.tok) {
+        let op = *op;
+        let term = match items.get(i + 1).map(|it| &it.tok) {
+            Some(Tok::Number(raw)) => parse_plain_int(raw),
+            _ => None,
+        };
+        let Some(term) = term else { break };
+        let claimed_by_tighter_op =
+            matches!(items.get(i + 2).map(|it| &it.tok), Some(Tok::Punct(c)) if matches!(c, '*' | '/' | '%'));
+        if claimed_by_tighter_op {
+            break;
+        }
+        value = fold_additive_op(value, op, term)?;
+        terms += 1;
+        i += 2;
+    }
+    if terms < 2 {
+        return None;
+    }
+    if value < i32::MIN as i64 || value > i32::MAX as i64 {
+        return None;
+    }
+    Some((i, value))
+}
+
+/// Folds a run of int literals connected purely by `+`/`-` into a single
+/// literal — e.g. `1+2+3` -> `6`, `3-5` -> `-2` — including an optional
+/// leading unary sign (`-5+3` -> `-2`). Companion to `fold_constants`
+/// above, which already handles `*`/`/`/`%`; see that function's doc
+/// comment for why `+`/`-` needed a separate, stricter pass rather than
+/// the same simple left-to-right scan.
+///
+/// **The critical extra rule `fold_constants` doesn't need**: a chain may
+/// only *start* where `additive_chain_boundary_ok` holds for the token
+/// immediately before it — which excludes not just `*`/`/`/`%` (the
+/// already-familiar "don't steal an operand from a tighter op" rule) but
+/// also `+`/`-` themselves. That second exclusion is what makes this
+/// safe against `X-A+B` for a non-numeric `X`: without it, a naive
+/// left-to-right scan (mirroring `fold_constants`'s approach exactly)
+/// would fold the `A+B` tail on its own, silently changing `(X-A)+B` into
+/// `X-(A+B)` — a different value whenever the sign of `A` matters. The
+/// same rule also correctly declines a doubled unary sign (`- -3+2`):
+/// unary `-` binds *tighter* than binary `+`, so `- -3+2` is
+/// `(-(-3))+2` = `5`, not `-(-3+2)` = `1` — treating the second `-` as a
+/// valid unary chain start (it's preceded by the first `-`, which this
+/// rule also excludes) would silently produce the wrong one.
+pub fn fold_additive_constants(items: Vec<Item>, stats: &mut AggressiveStats) -> Vec<Item> {
+    let mut out: Vec<Item> = Vec::with_capacity(items.len());
+    let mut i = 0;
+    while i < items.len() {
+        let before = if i == 0 { None } else { Some(i - 1) };
+        if additive_chain_boundary_ok(&items, before) {
+            // Case A: a bare number starts the chain directly.
+            if matches!(items[i].tok, Tok::Number(_)) {
+                if let Some((end, value)) = try_extend_additive_chain(&items, i, 1) {
+                    push_folded_int(&mut out, value);
+                    stats.constants_folded += 1;
+                    i = end;
+                    continue;
+                }
+            }
+            // Case B: a leading unary `+`/`-` immediately followed by a
+            // number starts the chain — the sign itself is folded in,
+            // never left dangling in front of a chain it doesn't apply to.
+            if let Some(Tok::Punct(sign_c @ ('+' | '-'))) = items.get(i).map(|it| &it.tok) {
+                let sign_c = *sign_c;
+                if matches!(items.get(i + 1).map(|it| &it.tok), Some(Tok::Number(_))) {
+                    let leading_sign = if sign_c == '-' { -1 } else { 1 };
+                    if let Some((end, value)) = try_extend_additive_chain(&items, i + 1, leading_sign) {
+                        push_folded_int(&mut out, value);
+                        stats.constants_folded += 1;
+                        i = end;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        out.push(items[i].clone());
+        i += 1;
+    }
+    out
+}
+
+/// Pushes a folded integer result as either a single `Number` item (when
+/// non-negative — GLSL has no negative-literal token, and dropping a
+/// redundant leading unary `+` is itself a free golf) or a synthesized
+/// unary-minus `Punct` followed by a `Number` of its absolute value
+/// (mirroring how the rest of the codebase already represents negative
+/// int literals, e.g. `reduce_constant_vectors`'s doc comment on `-1.`).
+fn push_folded_int(out: &mut Vec<Item>, value: i64) {
+    if value < 0 {
+        out.push(Item {
+            tok: Tok::Punct('-'),
+            text: "-".to_string(),
+            space_before: false,
+        });
+        let text = (-value).to_string();
+        out.push(Item {
+            tok: Tok::Number(text.clone()),
+            text,
+            space_before: false,
+        });
+    } else {
+        let text = value.to_string();
+        out.push(Item {
+            tok: Tok::Number(text.clone()),
+            text,
+            space_before: false,
+        });
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -1269,6 +1444,82 @@ pub fn strip_redundant_braces(items: Vec<Item>, stats: &mut AggressiveStats) -> 
                 out.push(items[close - 1].clone());
                 i = close;
                 continue;
+            }
+        }
+        out.push(items[i].clone());
+        i += 1;
+    }
+    out
+}
+
+// ---------------------------------------------------------------------
+// Redundant parenthesis removal — `(a)` -> `a`, `(foo(x).y)` -> `foo(x).y`.
+//
+// Safe in *any* surrounding context, unlike most rewrites in this file:
+// a primary expression (see `scan_primary` — an identifier or number,
+// optionally unary-prefixed and/or followed by a postfix chain of
+// `.member`/`[index]`/`(call args)`) is already GLSL's tightest-binding
+// grammatical unit. Wrapping one in parens can never change how it
+// associates with anything around it, so removing that wrapping can't
+// either — no precedence analysis needed at all, unlike
+// `fold_additive_constants` above. Declines the instant there's
+// anything *beyond* a single primary inside the parens (`(a+b)`,
+// `(a,b)`) — those really do fix a grouping and must stay.
+//
+// Only ever strips a *standalone* grouping `(` — one not immediately
+// preceded by an identifier-shaped token. That one check does two jobs
+// at once: it keeps real function-call parens untouched (`foo(x)`,
+// `vec3(x)` — `scan_primary` already treats `ident(args)` as one
+// continuous primary, so a bare `(` is never the true start of a group
+// there), and — since GLSL keywords like `if`/`while`/`for`/`switch`
+// tokenize as the exact same `Tok::Ident` variant as any other
+// identifier (see `vocab::keywords()`) — it also correctly leaves
+// `if(a)`/`while(a)`/`for(...)`/`switch(a)` alone, whose parens are
+// syntactically *mandatory*, not optional grouping. The one cost: a
+// genuinely optional `return(a);` is left unstripped too (`return`
+// tokenizes the same way), a missed byte or two rather than a bug.
+pub fn strip_redundant_parens(items: Vec<Item>, stats: &mut AggressiveStats) -> Vec<Item> {
+    let mut out: Vec<Item> = Vec::with_capacity(items.len());
+    let mut i = 0;
+    while i < items.len() {
+        if matches!(items[i].tok, Tok::Punct('(')) {
+            let preceded_by_ident = matches!(out.last().map(|it| &it.tok), Some(Tok::Ident(_)));
+            if !preceded_by_ident {
+                if let Some(close) = skip_balanced(&items, i, '(', ')') {
+                    let close_paren_idx = close - 1;
+                    if let Some(inner_end) = scan_primary(&items, i + 1) {
+                        if inner_end == close_paren_idx {
+                            // Deleting the `(` can create a *new* adjacency
+                            // `layout()`'s ambiguous-pair guard doesn't know
+                            // to check: that guard only inserts a
+                            // disambiguating space when the token's own
+                            // `space_before` (recorded from the original
+                            // source spacing) is true, which is never the
+                            // case for whatever sat immediately after `(`
+                            // in `(-x)` (no space in the source either).
+                            // Left alone, `5.-(-x)` -> `5.-` + `-x` would
+                            // print as `5.--x` — silently a *different*
+                            // program (the decrement operator, not two
+                            // unary/binary minuses) despite this pass
+                            // being about parens, not operators. Forcing
+                            // `space_before` true on the first re-emitted
+                            // token costs nothing when no fusion risk
+                            // actually exists (the guard still requires
+                            // `forms_ambiguous_pair` to hold before it
+                            // inserts anything) and fixes it when one does.
+                            // Caught by manual testing, not proven safe in
+                            // advance — see the dedicated regression test.
+                            let mut inner: Vec<Item> = items[i + 1..close_paren_idx].to_vec();
+                            if let Some(first) = inner.first_mut() {
+                                first.space_before = true;
+                            }
+                            out.extend(inner);
+                            stats.redundant_parens_removed += 1;
+                            i = close;
+                            continue;
+                        }
+                    }
+                }
             }
         }
         out.push(items[i].clone());

@@ -385,6 +385,9 @@ app.innerHTML = `
       <label data-i18n-title="pass.braces.title" title="">
         <input type="checkbox" id="pass-braces" checked /><span data-i18n="pass.braces.label">accolades</span>
       </label>
+      <label data-i18n-title="pass.parens.title" title="">
+        <input type="checkbox" id="pass-parens" checked /><span data-i18n="pass.parens.label">parenthèses</span>
+      </label>
       <label data-i18n-title="pass.trailingReturn.title" title="">
         <input type="checkbox" id="pass-trailing-return" checked /><span data-i18n="pass.trailingReturn.label">return finaux</span>
       </label>
@@ -457,6 +460,7 @@ const passIncDec = document.getElementById("pass-inc-dec") as HTMLInputElement;
 const passTernary = document.getElementById("pass-ternary") as HTMLInputElement;
 const passMerge = document.getElementById("pass-merge") as HTMLInputElement;
 const passBraces = document.getElementById("pass-braces") as HTMLInputElement;
+const passParens = document.getElementById("pass-parens") as HTMLInputElement;
 const passTrailingReturn = document.getElementById("pass-trailing-return") as HTMLInputElement;
 const passCheckboxes = [
   passDeadLocals,
@@ -468,6 +472,7 @@ const passCheckboxes = [
   passTernary,
   passMerge,
   passBraces,
+  passParens,
   passTrailingReturn,
 ];
 
@@ -1008,6 +1013,7 @@ function currentAggressiveOptions(): AggressiveOptions {
     ternaryFromIfElse: passTernary.checked,
     mergeDeclarations: passMerge.checked,
     stripRedundantBraces: passBraces.checked,
+    stripRedundantParens: passParens.checked,
   };
 }
 

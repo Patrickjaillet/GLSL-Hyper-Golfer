@@ -99,6 +99,8 @@ jobs:
         run: cargo build --release --bin golf
       - name: Rust ↔ TypeScript parity
         run: node scripts/parity-test.mjs
+      - name: Golfing-power regression guard (ROADMAP.md Phase 0)
+        run: node scripts/golf-size-budget.mjs
 
   e2e:
     runs-on: ubuntu-latest

@@ -531,6 +531,7 @@ export interface AggressiveStats {
   trailingVoidReturnsRemoved: number;
   incrementsDecrements: number;
   ternariesFromIfElse: number;
+  redundantParensRemoved: number;
 }
 
 function newAggressiveStats(): AggressiveStats {
@@ -545,6 +546,7 @@ function newAggressiveStats(): AggressiveStats {
     trailingVoidReturnsRemoved: 0,
     incrementsDecrements: 0,
     ternariesFromIfElse: 0,
+    redundantParensRemoved: 0,
   };
 }
 
@@ -629,12 +631,15 @@ function scanPrimary(items: Token[], start: number): number {
 // silent correctness risk for no benefit worth taking. Integers have no
 // such problem (GLSL int is exact 32-bit two's complement).
 //
-// +/- are also skipped: unlike */ /% (already the tightest arithmetic
-// precedence in GLSL, so folding them can never change how an
-// expression groups), folding a +/- pair would require checking that
-// neither neighbour is a */ /% about to claim one of the operands first
-// (2+3*4 is 2+(3*4), not (2+3)*4) — a precedence analysis this pass
-// doesn't do, so it declines rather than risk it.
+// +/- are deliberately not handled by *this* function: unlike */ /%
+// (already the tightest arithmetic precedence in GLSL, so folding them
+// can never change how an expression groups), folding a +/- pair
+// requires checking that neither neighbour is a */ /% about to claim
+// one of the operands first (2+3*4 is 2+(3*4), not (2+3)*4) — a real
+// precedence analysis, which is why it lives in its own function below
+// (foldAdditiveConstants, ROADMAP.md Phase 1.1, mirroring
+// aggressive.rs::fold_additive_constants) rather than this simpler
+// left-to-right scan.
 // ---------------------------------------------------------------------------
 
 const FOLDABLE_OPS = new Set(["*", "/", "%"]);
@@ -709,6 +714,154 @@ function foldConstants(items: Token[], stats: AggressiveStats): Token[] {
         stats.constantsFolded++;
         i += 2;
         continue;
+      }
+    }
+
+    out.push(items[i]);
+    i++;
+  }
+  return out;
+}
+
+/**
+ * Evaluates `a + b` or `a - b` with the same GLSL int (32-bit signed)
+ * semantics/overflow guard as `foldIntOp` — see there for why folding
+ * declines rather than guesses on overflow.
+ */
+function foldAdditiveOp(a: number, op: string, b: number): number | null {
+  const result = op === "+" ? a + b : op === "-" ? a - b : null;
+  if (result === null) return null;
+  if (!Number.isSafeInteger(result) || result < I32_MIN || result > I32_MAX) return null;
+  return result;
+}
+
+/**
+ * Is the token at `idx` (or `null`, meaning start of file/statement) a
+ * safe boundary for an additive chain to *start* right after it? Used
+ * identically whether the chain's first token is a bare number (case A)
+ * or a leading unary sign (case B) — which is exactly why an
+ * ident/number/`)`/`]` immediately before must count as *unsafe* here
+ * even though case A alone could never actually encounter one (two
+ * primaries can't be textually adjacent in valid GLSL without an
+ * operator between them): for case B, that same token is the tell that
+ * a +/- right after it is *binary*, not unary — `x-1+2` must decline
+ * exactly the same way `2+3*4` declines for `foldConstants`, and
+ * treating "an identifier/number/closing bracket precedes it" as safe
+ * was a real bug caught by manual testing (`x-1+2` corrupted into
+ * invalid GLSL before this fix), not a hypothetical — see
+ * aggressive.rs::additive_chain_boundary_ok for the Rust side of the
+ * same fix.
+ */
+function additiveChainBoundaryOk(items: Token[], idx: number | null): boolean {
+  if (idx === null) return true;
+  const tok = items[idx];
+  if (!tok) return true;
+  if (tok.kind === "punct") return !["*", "/", "%", "+", "-", ")", "]"].includes(tok.text);
+  return false; // an ident/number directly before: a real operand, so a following +/- is binary, not a safe chain start.
+}
+
+/**
+ * Extends an additive chain starting at the number token `firstNumIdx`
+ * (already known to be a plain int, contributing `leadingSign * value`)
+ * through as many further `(+|-) <int>` terms as it safely can, and
+ * returns `[endIndex, foldedValue]` if at least 2 terms were combined —
+ * folding a lone number "chain" would be a no-op, not a golf.
+ *
+ * A candidate next term is only consumed if the token *after* it isn't
+ * `*`/`/`/`%` — otherwise that number is about to be claimed as the left
+ * operand of a tighter multiplication/division/modulo (`1+2*3` is
+ * `1+(2*3)`, so the `2` must not be folded into `1+2`), and this pass
+ * stops the chain right before it instead. Left unfolded that way,
+ * nothing is lost long-term: `foldConstants` (run in the same fixpoint
+ * loop — ROADMAP.md Phase 0) folds `2*3` on its own, and a later
+ * fixpoint iteration of this function then folds the now-adjacent `1+6`.
+ */
+function tryExtendAdditiveChain(items: Token[], firstNumIdx: number, leadingSign: number): [number, number] | null {
+  const firstTok = items[firstNumIdx];
+  if (!firstTok || firstTok.kind !== "number") return null;
+  const firstVal = parsePlainInt(firstTok.text);
+  if (firstVal === null) return null;
+  let value = leadingSign * firstVal;
+  let i = firstNumIdx + 1;
+  let terms = 1;
+  for (;;) {
+    const opTok = items[i];
+    if (!opTok || opTok.kind !== "punct" || (opTok.text !== "+" && opTok.text !== "-")) break;
+    const termTok = items[i + 1];
+    const term = termTok && termTok.kind === "number" ? parsePlainInt(termTok.text) : null;
+    if (term === null) break;
+    const afterTok = items[i + 2];
+    const claimedByTighterOp = !!afterTok && afterTok.kind === "punct" && ["*", "/", "%"].includes(afterTok.text);
+    if (claimedByTighterOp) break;
+    const folded = foldAdditiveOp(value, opTok.text, term);
+    if (folded === null) return null;
+    value = folded;
+    terms++;
+    i += 2;
+  }
+  if (terms < 2) return null;
+  if (!Number.isSafeInteger(value) || value < I32_MIN || value > I32_MAX) return null;
+  return [i, value];
+}
+
+/**
+ * Pushes a folded integer result as either a single number token (when
+ * non-negative — GLSL has no negative-literal token, and dropping a
+ * redundant leading unary + is itself a free golf) or a synthesized
+ * unary-minus punct followed by a number of its absolute value.
+ */
+function pushFoldedInt(out: Token[], value: number): void {
+  if (value < 0) {
+    out.push({ kind: "punct", text: "-", spaceBefore: false });
+    out.push({ kind: "number", text: String(-value), spaceBefore: false });
+  } else {
+    out.push({ kind: "number", text: String(value), spaceBefore: false });
+  }
+}
+
+/**
+ * Folds a run of int literals connected purely by +/- into a single
+ * literal — e.g. `1+2+3` -> `6`, `3-5` -> `-2` — including an optional
+ * leading unary sign (`-5+3` -> `-2`). Companion to `foldConstants`
+ * above, which already handles `*`/`/`/`%`; see that function's doc
+ * comment for why +/- needed a separate, stricter pass rather than the
+ * same simple left-to-right scan. Mirrors
+ * aggressive.rs::fold_additive_constants exactly — see there for the
+ * full correctness argument (the `X-A+B` and doubled-unary-sign traps
+ * this boundary rule avoids).
+ */
+function foldAdditiveConstants(items: Token[], stats: AggressiveStats): Token[] {
+  const out: Token[] = [];
+  let i = 0;
+  while (i < items.length) {
+    const before = i === 0 ? null : i - 1;
+    if (additiveChainBoundaryOk(items, before)) {
+      const tok = items[i];
+      // Case A: a bare number starts the chain directly.
+      if (tok.kind === "number") {
+        const chain = tryExtendAdditiveChain(items, i, 1);
+        if (chain) {
+          pushFoldedInt(out, chain[1]);
+          stats.constantsFolded++;
+          i = chain[0];
+          continue;
+        }
+      }
+      // Case B: a leading unary +/- immediately followed by a number
+      // starts the chain — the sign itself is folded in, never left
+      // dangling in front of a chain it doesn't apply to.
+      if (tok.kind === "punct" && (tok.text === "+" || tok.text === "-")) {
+        const nextTok = items[i + 1];
+        if (nextTok && nextTok.kind === "number") {
+          const leadingSign = tok.text === "-" ? -1 : 1;
+          const chain = tryExtendAdditiveChain(items, i + 1, leadingSign);
+          if (chain) {
+            pushFoldedInt(out, chain[1]);
+            stats.constantsFolded++;
+            i = chain[0];
+            continue;
+          }
+        }
       }
     }
 
@@ -1581,6 +1734,57 @@ function stripRedundantBraces(items: Token[], stats: AggressiveStats): Token[] {
   return out;
 }
 
+/**
+ * Strips parentheses that wrap exactly one primary expression (as
+ * determined by `scanPrimary` — a primary is already the tightest-
+ * binding unit in the grammar, so parens around one are always
+ * removable regardless of surrounding context; no precedence analysis
+ * needed, unlike additive folding).
+ *
+ * Declines whenever the `(` is immediately preceded by an identifier:
+ * this excludes both real function-call parens (`foo(x)`) and GLSL
+ * control-flow keyword parens (`if(a)`, `while(a)`, `for(...)`,
+ * `switch(a)`) in one check, since keywords tokenize as the same
+ * "ident" kind as any other identifier in this lexer. `return(a)` is
+ * also conservatively left unstripped even though technically safe.
+ */
+function stripRedundantParens(items: Token[], stats: AggressiveStats): Token[] {
+  const out: Token[] = [];
+  let i = 0;
+  while (i < items.length) {
+    if (isPunct(items[i], "(")) {
+      const precededByIdent = out.length > 0 && out[out.length - 1].kind === "ident";
+      if (!precededByIdent) {
+        const close = skipBalanced(items, i, "(", ")");
+        if (close !== -1) {
+          const closeParenIdx = close - 1;
+          const innerEnd = scanPrimary(items, i + 1);
+          if (innerEnd === closeParenIdx) {
+            // Deleting the `(` can create a *new* adjacency that
+            // `layout()`'s ambiguous-pair guard doesn't know to check,
+            // since that guard only fires based on a token's own
+            // `spaceBefore` (recorded from the ORIGINAL source), not
+            // on adjacencies created by later passes. E.g. `5.-(-x)`:
+            // the inner `-` had no space before it in `(-x)`, so
+            // simply re-emitting the inner tokens as-is would produce
+            // `5.--x` — force `spaceBefore` on the first re-emitted
+            // token so the guard actually runs.
+            const inner = items.slice(i + 1, closeParenIdx).map((t) => t);
+            if (inner.length > 0) inner[0] = { ...inner[0], spaceBefore: true };
+            out.push(...inner);
+            stats.redundantParensRemoved++;
+            i = close;
+            continue;
+          }
+        }
+      }
+    }
+    out.push(items[i]);
+    i++;
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Layout (re-joining tokens with the minimum safe whitespace)
 // ---------------------------------------------------------------------------
@@ -1670,6 +1874,7 @@ export interface AggressiveOptions {
   ternaryFromIfElse: boolean;
   mergeDeclarations: boolean;
   stripRedundantBraces: boolean;
+  stripRedundantParens: boolean;
 }
 
 export function allAggressiveOptions(on: boolean): AggressiveOptions {
@@ -1684,6 +1889,7 @@ export function allAggressiveOptions(on: boolean): AggressiveOptions {
     ternaryFromIfElse: on,
     mergeDeclarations: on,
     stripRedundantBraces: on,
+    stripRedundantParens: on,
   };
 }
 
@@ -1694,6 +1900,15 @@ export function allAggressiveOptions(on: boolean): AggressiveOptions {
  * touch. `aggressive` accepts a plain boolean (all passes on/off, the
  * common case) or an `AggressiveOptions` for per-pass control.
  */
+/** Structural equality for two token/item arrays — used to detect the aggressive-pass fixpoint (see `golf()`). */
+function itemsEqual(a: Token[], b: Token[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].kind !== b[i].kind || a[i].text !== b[i].text || a[i].spaceBefore !== b[i].spaceBefore) return false;
+  }
+  return true;
+}
+
 export function golf(
   source: string,
   aggressive: boolean | AggressiveOptions = false,
@@ -1800,17 +2015,34 @@ export function golf(
     return { kind: t.kind, text, spaceBefore: t.spaceBefore };
   });
 
+  // Run the whole aggressive pipeline to a fixpoint rather than once
+  // through in a fixed order (ROADMAP.md Phase 0), mirroring
+  // golfer.rs — see the comment there for why. Accumulating
+  // `aggressiveStats` across iterations (rather than resetting each
+  // round) already gives the right "total across the whole run"
+  // semantics for free.
+  const MAX_FIXPOINT_ITERATIONS = 10;
   const aggressiveStats = newAggressiveStats();
-  if (options.eliminateDeadLocals) items = eliminateDeadLocals(items, aggressiveStats);
-  if (options.eliminateDeadStores) items = eliminateDeadStores(items, aggressiveStats);
-  if (options.foldConstants) items = foldConstants(items, aggressiveStats);
-  if (options.reduceConstantVectors) items = reduceConstantVectors(items, aggressiveStats);
-  if (options.compoundAssignments) items = compoundAssignments(items, aggressiveStats);
-  if (options.incrementDecrement) items = incrementDecrement(items, aggressiveStats);
-  if (options.ternaryFromIfElse) items = ternaryFromIfElse(items, aggressiveStats);
-  if (options.mergeDeclarations) items = mergeDeclarations(items, aggressiveStats);
-  if (options.stripRedundantBraces) items = stripRedundantBraces(items, aggressiveStats);
-  if (options.stripTrailingVoidReturn) items = stripTrailingVoidReturn(items, aggressiveStats);
+  for (let iter = 0; iter < MAX_FIXPOINT_ITERATIONS; iter++) {
+    const before = items;
+    if (options.eliminateDeadLocals) items = eliminateDeadLocals(items, aggressiveStats);
+    if (options.eliminateDeadStores) items = eliminateDeadStores(items, aggressiveStats);
+    if (options.foldConstants) {
+      items = foldConstants(items, aggressiveStats);
+      // Same toggle, not a separate one — see the same comment in
+      // golfer.rs::golf_with_protected_names.
+      items = foldAdditiveConstants(items, aggressiveStats);
+    }
+    if (options.reduceConstantVectors) items = reduceConstantVectors(items, aggressiveStats);
+    if (options.compoundAssignments) items = compoundAssignments(items, aggressiveStats);
+    if (options.incrementDecrement) items = incrementDecrement(items, aggressiveStats);
+    if (options.ternaryFromIfElse) items = ternaryFromIfElse(items, aggressiveStats);
+    if (options.mergeDeclarations) items = mergeDeclarations(items, aggressiveStats);
+    if (options.stripRedundantBraces) items = stripRedundantBraces(items, aggressiveStats);
+    if (options.stripRedundantParens) items = stripRedundantParens(items, aggressiveStats);
+    if (options.stripTrailingVoidReturn) items = stripTrailingVoidReturn(items, aggressiveStats);
+    if (itemsEqual(before, items)) break;
+  }
 
   const code = layout(items);
   const outputChars = code.length;

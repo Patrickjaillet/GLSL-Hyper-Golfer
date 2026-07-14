@@ -22,7 +22,7 @@ export function golf_json(source: string, aggressive: boolean): string;
  * matching how a single text input in the UI naturally provides
  * this. Returns the same JSON shape as `golf_json`.
  */
-export function golf_json_protected(source: string, eliminate_dead_locals: boolean, eliminate_dead_stores: boolean, fold_constants: boolean, reduce_constant_vectors: boolean, strip_trailing_void_return: boolean, compound_assignments: boolean, increment_decrement: boolean, ternary_from_if_else: boolean, merge_declarations: boolean, strip_redundant_braces: boolean, protected_names: string): string;
+export function golf_json_protected(source: string, eliminate_dead_locals: boolean, eliminate_dead_stores: boolean, fold_constants: boolean, reduce_constant_vectors: boolean, strip_trailing_void_return: boolean, compound_assignments: boolean, increment_decrement: boolean, ternary_from_if_else: boolean, merge_declarations: boolean, strip_redundant_braces: boolean, strip_redundant_parens: boolean, protected_names: string): string;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
@@ -30,7 +30,7 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly golf_code: (a: number, b: number, c: number) => [number, number];
     readonly golf_json: (a: number, b: number, c: number) => [number, number];
-    readonly golf_json_protected: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number) => [number, number];
+    readonly golf_json_protected: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number) => [number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
