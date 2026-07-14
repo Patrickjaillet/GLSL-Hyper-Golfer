@@ -250,10 +250,42 @@ classements), thèmes visuels, et optimisation mobile.
       notion d'échec bloquant ailleurs. Vérifié en headless (déclenche
       bien le bandeau sur `texture2D(...)`, se retraduit correctement au
       changement de langue).
-- [ ] Gestion propre des **erreurs de parsing** (aujourd'hui tout
-      repose sur des heuristiques token-based ; ajouter un vrai mode
-      "je ne comprends pas cette construction, je la laisse intacte"
-      avec warning visible, plutôt que de risquer un golf incorrect)
+- 🟡 **PARTIEL (14/07/2026) — Gestion propre des erreurs de parsing.**
+      Un vrai mode générique "je ne comprends pas cette construction"
+      demanderait d'écrire un véritable validateur de grammaire GLSL
+      — un projet à part entière, hors de portée en une session. À la
+      place : recherche ciblée (agent dédié) pour trouver de vrais
+      angles morts de correction dans le pipeline sûr *toujours actif*
+      (renommage scope-aware + raccourcissement — tourne sur chaque
+      shader, pas seulement derrière une case à cocher agressive, donc
+      le risque y est plus grave qu'ailleurs). **Un vrai bug trouvé et
+      corrigé** : un nom référencé *uniquement* à l'intérieur du corps
+      d'une macro `#define` (ex. `PI` dans `#define TAU (2.0*PI)`,
+      jamais utilisé comme token nu ailleurs) n'était protégé nulle
+      part contre la génération d'un nouveau nom identique — les
+      lignes `#define` sont conservées telles quelles et jamais
+      tokenisées au-delà de leur texte brut, donc ce nom était invisible
+      au balayage "protéger tout identifiant déjà présent dans la
+      source". Si `NameGen` finissait par produire exactement cette
+      chaîne pour une variable sans rapport, l'expansion de macro
+      référencerait alors silencieusement la mauvaise variable — ou,
+      pire, entrerait en collision avec la ligne de déclaration de la
+      macro elle-même, produisant du GLSL invalide. `preproc_referenced_names`
+      existait déjà et servait à empêcher de *renommer une déclaration*
+      du même nom, mais jamais à protéger ce nom d'être *généré* comme
+      nouveau nom — la moitié manquante. Corrigé des deux côtés
+      (`golfer.rs::golf_with_options` + miroir TS), nouveau test Rust
+      dédié + `fixtures/macro_only_reference.glsl` en parité Rust/TS/wasm
+      (38/38). **Vérifié aussi et trouvés déjà sûrs** (donc non modifiés) :
+      surcharge de fonctions, masquage de variable locale (shadowing),
+      chaînes d'accès à des membres de struct, tableaux multi-dimensionnels
+      — le renommage est du remplacement textuel par orthographe, appliqué
+      uniformément à tout le fichier, donc insensible à la portée par
+      construction pour ces cas-là. **Reste non fait** : le mode
+      générique "avertir sur toute construction non reconnue" demandé à
+      l'origine par cet item — ce qui a été livré est la correction d'un
+      bug concret trouvé par investigation ciblée, pas un système de
+      détection général.
 
 ### 1.3 Config / API du moteur
 - [ ] Exposer un **niveau de golf réglable** (safe / balanced /

@@ -1723,6 +1723,14 @@ export function golf(source: string, aggressive: boolean | AggressiveOptions = f
   for (const t of tokens) {
     if (t.kind === "ident" && !renamableSet.has(t.text)) taken.add(t.text);
   }
+  // Also protect every name referenced *only* inside a `#define` body
+  // (e.g. `PI` in `#define TAU (2.0*PI)` when `PI` never appears as a
+  // bare token anywhere else) — mirrors the identical fix in
+  // `golfer.rs::golf_with_options`. `#define` lines are never
+  // tokenized past their raw text, so this spelling is otherwise
+  // invisible to the sweep just above even though the real GLSL
+  // preprocessor substitutes it textually wherever it's spelled.
+  for (const n of preprocReferencedNames(tokens)) taken.add(n);
 
   // Scope-aware assignment: `taken` holds names visible *everywhere*
   // (keywords/builtins/protected/untouched-originals plus every

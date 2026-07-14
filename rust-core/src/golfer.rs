@@ -475,6 +475,24 @@ pub fn golf_with_options(source: &str, aggressive: AggressiveOptions) -> GolfRes
             }
         }
     }
+    // Also protect every name referenced *only* inside a `#define` body
+    // (e.g. `PI` in `#define TAU (2.0*PI)` when `PI` never appears as a
+    // bare token anywhere else) — `#define` lines are kept verbatim and
+    // never tokenized past their raw text (see `Tok::Preproc`), so a
+    // name like this is otherwise entirely invisible to the sweep just
+    // above, even though the real GLSL preprocessor will substitute it
+    // textually wherever it's spelled after its point of definition.
+    // Without this, NameGen could hand out that exact spelling to some
+    // unrelated variable, and the macro expansion would then silently
+    // reference the freshly-renamed variable instead of what the source
+    // actually meant — or outright fail to compile if the generated
+    // name collides with the macro's own declaration line. This was a
+    // real gap: `preproc_referenced_names` already existed and was used
+    // by `find_renamable` to stop a same-named *declaration* from being
+    // renamed, but that's only half of what's needed — the other half,
+    // protecting the spelling from being *generated* as a new name, was
+    // missing until now.
+    taken.extend(preproc_referenced_names(&tokens));
 
     // Scope-aware assignment: `taken` holds names visible *everywhere*
     // (keywords/builtins/protected/untouched-originals plus every
@@ -1223,6 +1241,29 @@ mod tests {
             false,
         );
         assert_eq!(r.code, "struct c{float v;};void d(){c a;float b=1.;b=b+1.;}");
+    }
+
+    #[test]
+    fn name_referenced_only_inside_a_macro_body_is_protected_from_collision() {
+        // `a` is a real, valid macro (`#define a 3.0`), referenced only
+        // from inside another macro's body (`#define TAU (2.0*a)`) —
+        // never as a bare token in actual code. `#define` lines are
+        // kept verbatim and never tokenized past their raw text, so
+        // without protecting this spelling, NameGen's very first
+        // candidate ("a") would be handed to the one real local here,
+        // producing `float a=1.;` alongside the untouched `#define a
+        // 3.0` — the real GLSL preprocessor would then substitute that
+        // macro into its own declaration (`float 3.0=1.;`), which
+        // doesn't even parse. Pins that the local gets "b" instead,
+        // leaving "a" alone for the macro.
+        let r = golf(
+            "#define a 3.0\n#define TAU (2.0*a)\nvoid mainImage(out vec4 fragColor,in vec2 fragCoord){float velocity=1.0;fragColor=vec4(velocity+TAU);}",
+            false,
+        );
+        assert_eq!(
+            r.code,
+            "#define a 3.0\n#define TAU (2.0*a)\nvoid mainImage(out vec4 b,in vec2 d){float c=1.;b=vec4(c+TAU);}"
+        );
     }
 
     #[test]
