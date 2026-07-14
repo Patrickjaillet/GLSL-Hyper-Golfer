@@ -17,6 +17,22 @@ void main() {
   gl_Position = vec4(position, 0.0, 1.0);
 }`;
 
+/**
+ * `iDate.xyzw` = year, month, day, seconds-since-midnight (local time).
+ * Month matches `Date.getMonth()` directly (0 = January) rather than
+ * the 1-12 a calendar would show — this is Shadertoy's own convention
+ * too, since its reference implementation is itself JS-backed and
+ * passes `getMonth()` through unchanged.
+ */
+function currentIDate(): [number, number, number, number] {
+  const d = new Date();
+  const secondsSinceMidnight = d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds() + d.getMilliseconds() / 1000;
+  return [d.getFullYear(), d.getMonth(), d.getDate(), secondsSinceMidnight];
+}
+
+/** No audio input is captured (see ROADMAP.md), so this is a fixed, plausible default rather than a real device sample rate. */
+const DEFAULT_SAMPLE_RATE = 44100;
+
 export interface RenderError {
   stage: "vertex" | "fragment" | "link";
   log: string;
@@ -43,6 +59,8 @@ export class ShaderRunner {
   private frame = 0;
   private lastFpsSample = performance.now();
   private fpsAccum = 0;
+  /** Smoothed (500ms window), not instantaneous 1/dt -- backs `iFrameRate`, same value shown as the UI's own FPS counter. */
+  private lastFps = 60;
   public onFps: ((fps: number) => void) | null = null;
   public onError: ((err: RenderError | null) => void) | null = null;
 
@@ -110,8 +128,8 @@ export class ShaderRunner {
     // going to texture correctly anyway. See `MultiPassRunner` below for
     // the real multi-buffer/channel-wiring renderer.
     const precisionHeader = this.isGL2
-      ? `#version 300 es\nprecision highp float;\nuniform vec3 iResolution;\nuniform float iTime;\nuniform float iTimeDelta;\nuniform int iFrame;\nuniform vec4 iMouse;\nuniform sampler2D iChannel0;\nuniform sampler2D iChannel1;\nuniform sampler2D iChannel2;\nuniform sampler2D iChannel3;\nout vec4 outColor;\n`
-      : `precision highp float;\nuniform vec3 iResolution;\nuniform float iTime;\nuniform float iTimeDelta;\nuniform int iFrame;\nuniform vec4 iMouse;\nuniform sampler2D iChannel0;\nuniform sampler2D iChannel1;\nuniform sampler2D iChannel2;\nuniform sampler2D iChannel3;\n`;
+      ? `#version 300 es\nprecision highp float;\nuniform vec3 iResolution;\nuniform float iTime;\nuniform float iTimeDelta;\nuniform int iFrame;\nuniform vec4 iMouse;\nuniform sampler2D iChannel0;\nuniform sampler2D iChannel1;\nuniform sampler2D iChannel2;\nuniform sampler2D iChannel3;\nuniform float iChannelTime[4];\nuniform vec3 iChannelResolution[4];\nuniform vec4 iDate;\nuniform float iSampleRate;\nuniform float iFrameRate;\nout vec4 outColor;\n`
+      : `precision highp float;\nuniform vec3 iResolution;\nuniform float iTime;\nuniform float iTimeDelta;\nuniform int iFrame;\nuniform vec4 iMouse;\nuniform sampler2D iChannel0;\nuniform sampler2D iChannel1;\nuniform sampler2D iChannel2;\nuniform sampler2D iChannel3;\nuniform float iChannelTime[4];\nuniform vec3 iChannelResolution[4];\nuniform vec4 iDate;\nuniform float iSampleRate;\nuniform float iFrameRate;\n`;
 
     const entry = this.isGL2
       ? `\nvoid main(){ vec4 c; mainImage(c, gl_FragCoord.xy); outColor = c; }\n`
@@ -237,6 +255,17 @@ export class ShaderRunner {
         this.mouse.down ? this.mouse.downX : -Math.abs(this.mouse.downX),
         this.mouse.down ? this.mouse.downY : -Math.abs(this.mouse.downY),
       );
+      // No video/webcam/audio channels, and this runner never binds any
+      // texture to iChannel0-3 at all (see buildFullFsSource) -- every
+      // channel reports the shader's own elapsed time and zero
+      // resolution, matching Shadertoy's behaviour for an unbound
+      // sampler.
+      gl.uniform1fv(gl.getUniformLocation(this.program, "iChannelTime"), [elapsed, elapsed, elapsed, elapsed]);
+      gl.uniform3fv(gl.getUniformLocation(this.program, "iChannelResolution"), new Float32Array(12));
+      const iDate = currentIDate();
+      gl.uniform4f(gl.getUniformLocation(this.program, "iDate"), iDate[0], iDate[1], iDate[2], iDate[3]);
+      gl.uniform1f(gl.getUniformLocation(this.program, "iSampleRate"), DEFAULT_SAMPLE_RATE);
+      gl.uniform1f(gl.getUniformLocation(this.program, "iFrameRate"), this.lastFps);
 
       gl.viewport(0, 0, this.canvas.width, this.canvas.height);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
@@ -246,6 +275,7 @@ export class ShaderRunner {
       if (now - this.lastFpsSample >= 500) {
         const fps = (this.fpsAccum * 1000) / (now - this.lastFpsSample);
         this.onFps?.(fps);
+        this.lastFps = fps;
         this.fpsAccum = 0;
         this.lastFpsSample = now;
       }
@@ -302,6 +332,11 @@ interface CompiledPass {
     iFrame: WebGLUniformLocation | null;
     iMouse: WebGLUniformLocation | null;
     iChannel: (WebGLUniformLocation | null)[];
+    iChannelTime: WebGLUniformLocation | null;
+    iChannelResolution: WebGLUniformLocation | null;
+    iDate: WebGLUniformLocation | null;
+    iSampleRate: WebGLUniformLocation | null;
+    iFrameRate: WebGLUniformLocation | null;
   };
 }
 
@@ -333,6 +368,8 @@ export class MultiPassRunner {
   private frame = 0;
   private lastFpsSample = performance.now();
   private fpsAccum = 0;
+  /** Smoothed (500ms window), not instantaneous 1/dt -- backs `iFrameRate`, same value shown as the UI's own FPS counter. */
+  private lastFps = 60;
   public onFps: ((fps: number) => void) | null = null;
   public onError: ((err: MultiPassError | null) => void) | null = null;
 
@@ -426,7 +463,7 @@ export class MultiPassRunner {
   }
 
   private buildFsSource(fragmentBody: string): { source: string; bodyStartLine: number } {
-    const header = `#version 300 es\nprecision highp float;\nuniform vec3 iResolution;\nuniform float iTime;\nuniform float iTimeDelta;\nuniform int iFrame;\nuniform vec4 iMouse;\nuniform sampler2D iChannel0;\nuniform sampler2D iChannel1;\nuniform sampler2D iChannel2;\nuniform sampler2D iChannel3;\nout vec4 outColor;\n`;
+    const header = `#version 300 es\nprecision highp float;\nuniform vec3 iResolution;\nuniform float iTime;\nuniform float iTimeDelta;\nuniform int iFrame;\nuniform vec4 iMouse;\nuniform sampler2D iChannel0;\nuniform sampler2D iChannel1;\nuniform sampler2D iChannel2;\nuniform sampler2D iChannel3;\nuniform float iChannelTime[4];\nuniform vec3 iChannelResolution[4];\nuniform vec4 iDate;\nuniform float iSampleRate;\nuniform float iFrameRate;\nout vec4 outColor;\n`;
     const entry = `\nvoid main(){ vec4 c; mainImage(c, gl_FragCoord.xy); outColor = c; }\n`;
     return { source: header + fragmentBody + entry, bodyStartLine: header.split("\n").length };
   }
@@ -464,6 +501,15 @@ export class MultiPassRunner {
         iFrame: gl.getUniformLocation(program, "iFrame"),
         iMouse: gl.getUniformLocation(program, "iMouse"),
         iChannel: [0, 1, 2, 3].map((i) => gl.getUniformLocation(program, `iChannel${i}`)),
+        // Array uniforms: WebGL2 accepts the bare (un-indexed) name for
+        // *Nfv-style bulk-setting the whole array at once, so a single
+        // location covers all 4 elements — no need for 4 separate
+        // "iChannelTime[0]".."[3]" lookups.
+        iChannelTime: gl.getUniformLocation(program, "iChannelTime"),
+        iChannelResolution: gl.getUniformLocation(program, "iChannelResolution"),
+        iDate: gl.getUniformLocation(program, "iDate"),
+        iSampleRate: gl.getUniformLocation(program, "iSampleRate"),
+        iFrameRate: gl.getUniformLocation(program, "iFrameRate"),
       },
     };
   }
@@ -551,7 +597,7 @@ export class MultiPassRunner {
     return this.buffers.get(wiring.id)?.front ?? this.placeholderTex;
   }
 
-  private setPassUniforms(pass: CompiledPass, elapsed: number, dt: number): void {
+  private setPassUniforms(pass: CompiledPass, elapsed: number, dt: number, iDate: [number, number, number, number]): void {
     const gl = this.gl;
     gl.useProgram(pass.program);
     gl.uniform3f(pass.uniforms.iResolution, this.width, this.height, 1);
@@ -570,6 +616,26 @@ export class MultiPassRunner {
       gl.bindTexture(gl.TEXTURE_2D, this.resolveChannelTexture(pass.channels[ch]));
       gl.uniform1i(pass.uniforms.iChannel[ch], ch);
     }
+    // No video/webcam/audio channel types are supported (see
+    // ROADMAP.md), so there's no real per-channel clock to report --
+    // every channel gets the shader's own elapsed time, same as
+    // Shadertoy does for channels with nothing time-varying bound.
+    gl.uniform1fv(pass.uniforms.iChannelTime, [elapsed, elapsed, elapsed, elapsed]);
+    const channelRes = new Float32Array(12);
+    for (let ch = 0; ch < 4; ch++) {
+      // Every buffer in this app renders at the same resolution as the
+      // canvas (see `createTarget`), so any channel actually wired to
+      // one reports that; an unwired ("none") channel reports all-zero,
+      // matching Shadertoy's own behaviour for an unbound sampler.
+      const bound = pass.channels[ch].kind === "buffer";
+      channelRes[ch * 3] = bound ? this.width : 0;
+      channelRes[ch * 3 + 1] = bound ? this.height : 0;
+      channelRes[ch * 3 + 2] = bound ? 1 : 0;
+    }
+    gl.uniform3fv(pass.uniforms.iChannelResolution, channelRes);
+    gl.uniform4f(pass.uniforms.iDate, iDate[0], iDate[1], iDate[2], iDate[3]);
+    gl.uniform1f(pass.uniforms.iSampleRate, DEFAULT_SAMPLE_RATE);
+    gl.uniform1f(pass.uniforms.iFrameRate, this.lastFps);
   }
 
   start(): void {
@@ -584,6 +650,7 @@ export class MultiPassRunner {
       if (this.paused) return;
 
       const elapsed = (now - this.startTime) / 1000;
+      const iDate = currentIDate();
       gl.viewport(0, 0, this.width, this.height);
 
       for (const pass of this.passes) {
@@ -591,7 +658,7 @@ export class MultiPassRunner {
         const target = this.buffers.get(pass.id);
         if (!target) continue;
         gl.bindFramebuffer(gl.FRAMEBUFFER, target.backFbo);
-        this.setPassUniforms(pass, elapsed, dt);
+        this.setPassUniforms(pass, elapsed, dt, iDate);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
         const tmp = target.front;
         target.front = target.back;
@@ -604,7 +671,7 @@ export class MultiPassRunner {
       const imagePass = this.passes.find((p) => p.id === "image");
       if (imagePass) {
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        this.setPassUniforms(imagePass, elapsed, dt);
+        this.setPassUniforms(imagePass, elapsed, dt, iDate);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
       }
 
@@ -613,6 +680,7 @@ export class MultiPassRunner {
       if (now - this.lastFpsSample >= 500) {
         const fps = (this.fpsAccum * 1000) / (now - this.lastFpsSample);
         this.onFps?.(fps);
+        this.lastFps = fps;
         this.fpsAccum = 0;
         this.lastFpsSample = now;
       }

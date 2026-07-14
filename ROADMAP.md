@@ -474,8 +474,44 @@ Shadertoy a besoin de :
 - [ ] Support **cubemaps** et **volume textures** en entrée
 - [ ] Support des **textures statiques** (upload d'image / textures
       stock Shadertoy) comme source de canal
-- [ ] Uniforms manquants : `iChannelTime[4]`, `iChannelResolution[4]`,
-      `iDate`, `iSampleRate`, `iFrameRate`
+- ✅ **FAIT (14/07/2026) — Uniforms manquants ajoutés** dans les deux
+      moteurs de rendu (`ShaderRunner` mono-passe et `MultiPassRunner`,
+      `web/src/renderer.ts`). Choisi comme le plus petit des trois items
+      de cette liste (pas de nouveau pipeline d'upload/texture à
+      construire, juste déclarer des uniforms et leur donner une
+      valeur chaque frame) :
+  - `iChannelTime[4]` : aucun canal vidéo/webcam/audio n'est supporté
+    (voir plus bas), donc pas de vraie horloge par canal à rapporter —
+    chaque élément reçoit le temps écoulé du shader lui-même, comme le
+    fait Shadertoy pour un canal sans rien de variable dans le temps.
+  - `iChannelResolution[4]` : tous les buffers de cette app rendent à
+    la même résolution que le canvas (`createTarget`), donc un canal
+    câblé à un buffer rapporte cette résolution ; un canal "aucun"
+    rapporte du zéro partout, comme le ferait Shadertoy pour un
+    sampler non lié.
+  - `iDate` : construit depuis `Date` du navigateur. Convention du mois
+    **non évidente et documentée explicitement en commentaire** plutôt
+    que devinée en silence : `.y` correspond directement à
+    `Date.getMonth()` (0 = janvier), pas à un numéro de mois 1-12 —
+    c'est aussi ce que fait Shadertoy en pratique, son implémentation
+    de référence étant elle-même en JS et transmettant `getMonth()`
+    tel quel.
+  - `iSampleRate` : constante `44100.0`, valeur plausible par défaut
+    puisqu'aucune entrée audio réelle n'est captée.
+  - `iFrameRate` : réutilise le FPS déjà lissé sur une fenêtre de
+    500ms que l'UI affichait déjà (`onFps`), pas un `1/dt` instantané
+    bruité — ajouté comme nouveau champ `lastFps` sur chaque runner.
+      Vérifié en headless (script jetable, supprimé après usage) :
+      un shader référençant les 5 nouveaux uniforms compile sans
+      bandeau d'erreur et le viewport continue de rendre (FPS > 0) —
+      seedé via le mécanisme d'autosave existant plutôt que tapé au
+      clavier dans CodeMirror, après avoir découvert que la
+      fermeture-auto-des-accolades de l'éditeur produit une accolade
+      dupliquée quand Playwright tape du texte multi-lignes déjà
+      équilibré en accolades (un artefact du script de test, pas un
+      bug de l'app — repéré, diagnostiqué et contourné avant de
+      conclure que la fonctionnalité marchait). Suite complète (tsc,
+      eslint, build, e2e) inchangée.
 - [ ] Support **audio input** (`iChannel` en mode microphone/FFT comme
       Shadertoy)
 - [ ] Support **vidéo** et **webcam** comme source de canal
