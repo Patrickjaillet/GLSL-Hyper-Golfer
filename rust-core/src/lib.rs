@@ -59,6 +59,7 @@ mod wasm_api {
         strip_redundant_braces: bool,
         strip_redundant_parens: bool,
         strip_duplicate_precision: bool,
+        eliminate_dead_functions: bool,
         protected_names: &str,
     ) -> String {
         let options = AggressiveOptions {
@@ -74,6 +75,7 @@ mod wasm_api {
             strip_redundant_braces,
             strip_redundant_parens,
             strip_duplicate_precision,
+            eliminate_dead_functions,
         };
         let names: Vec<String> = protected_names
             .split(',')

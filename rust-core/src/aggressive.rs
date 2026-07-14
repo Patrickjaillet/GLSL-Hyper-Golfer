@@ -9,7 +9,7 @@
 
 use crate::lexer::Tok;
 use crate::vocab::type_keywords;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, PartialEq)]
 pub struct Item {
@@ -33,6 +33,7 @@ pub struct AggressiveStats {
     pub ternaries_from_if_else: usize,
     pub redundant_parens_removed: usize,
     pub duplicate_precision_removed: usize,
+    pub dead_functions_removed: usize,
 }
 
 fn is_unary_prefix(c: char) -> bool {
@@ -1766,6 +1767,205 @@ pub fn strip_redundant_parens(items: Vec<Item>, stats: &mut AggressiveStats) -> 
                         }
                     }
                 }
+            }
+        }
+        out.push(items[i].clone());
+        i += 1;
+    }
+    out
+}
+
+// ---------------------------------------------------------------------
+// Dead function elimination (ROADMAP.md Phase 1.2).
+//
+// Finds every top-level `<ident> <ident>(...){...}` — exactly the
+// shape of a GLSL function definition, and the only thing that shape
+// can mean at true top level: a struct body's `{` is never preceded
+// by a `)`, and control-flow blocks like `if(...){...}` can never
+// appear outside a function body in valid GLSL, so no extra keyword
+// exclusion is needed here the way `strip_redundant_parens` needs one
+// for its own, different, pattern. The first identifier (the "return
+// type" slot) is accepted as-is without checking it against
+// `type_keywords()` — deliberately, so a function returning a
+// user-defined `struct` is still recognized (only built-in type names
+// live in that set); the surrounding shape alone (matched parens then
+// an immediately-following top-level brace) is already unambiguous
+// evidence of a function definition, the same reasoning
+// `golfer.rs::function_scope_ranges`/`extend_left_to_params` already
+// rely on for the identical structural pattern.
+//
+// Reachability is a simple walk over a call graph built by looking for
+// *any* other known function name appearing as a bare identifier
+// anywhere inside each function's own definition span. Anything never
+// reached from the shader's own entry points (`main`/`mainImage`,
+// whichever is actually defined) is provably dead: GLSL has no
+// function pointers, reflection, or any way to reference a function by
+// name other than calling it, so "never referenced" really does mean
+// "can have no observable effect" here, not just "probably unused".
+//
+// Two functions that happen to share a name (legal GLSL overloading by
+// parameter types) are tracked as a single call-graph node and kept or
+// removed *together* — this pass has no type information to tell which
+// overload a given call site resolves to, so treating the name as
+// reachable if *any* call to it exists is the conservative, always-
+// safe choice (worst case: an actually-dead overload survives next to
+// a live one; never: a live one gets removed).
+//
+// **Declines entirely if neither `main` nor `mainImage` is defined in
+// this token stream.** Without a known entry point there is nothing
+// safe to walk from — treating every function as unreachable would
+// delete legitimate library code (e.g. a `Common` buffer's helper
+// functions, golfed on their own with no `mainImage` of their own to
+// call them — ROADMAP.md Phase 4). Declining is always safe; guessing
+// an entry point isn't.
+// ---------------------------------------------------------------------
+
+/// Scans backward from a `)` at `close_paren` for its matching `(`, or
+/// `None` if unbalanced — the mirror image of `skip_balanced`, needed
+/// here because a function's parameter list has to be found by
+/// walking left from its own body's opening brace.
+fn matching_open_paren(items: &[Item], close_paren: usize) -> Option<usize> {
+    if !matches!(items.get(close_paren).map(|it| &it.tok), Some(Tok::Punct(')'))) {
+        return None;
+    }
+    let mut depth = 0i32;
+    let mut i = close_paren;
+    loop {
+        match items.get(i).map(|it| &it.tok) {
+            Some(Tok::Punct(')')) => depth += 1,
+            Some(Tok::Punct('(')) => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            None => return None,
+            _ => {}
+        }
+        if i == 0 {
+            return None;
+        }
+        i -= 1;
+    }
+}
+
+/// One `<type> <name>(...){...}` found at true top level: `def_start`
+/// is the return-type token's index, `body_close` is the closing `}`.
+/// Deleting `items[def_start..=body_close]` removes the whole
+/// definition, nothing more and nothing less.
+struct FunctionDef {
+    name: String,
+    def_start: usize,
+    body_close: usize,
+}
+
+/// Finds every top-level function definition, in source order. Jumps
+/// straight over every top-level `{...}` span it finds (function or
+/// not) via `skip_balanced`, so nothing nested inside one is ever
+/// independently misidentified as its own top-level definition —
+/// mirrors `golfer.rs::top_level_brace_ranges`'s same jump-the-whole-
+/// span approach.
+fn find_function_definitions(items: &[Item]) -> Vec<FunctionDef> {
+    let mut defs = Vec::new();
+    let mut i = 0;
+    while i < items.len() {
+        if matches!(items[i].tok, Tok::Punct('{')) {
+            if let Some(close) = skip_balanced(items, i, '{', '}') {
+                let body_close = close - 1;
+                if i >= 1 {
+                    if let Some(open_paren) = matching_open_paren(items, i - 1) {
+                        if open_paren >= 2 {
+                            let name_idx = open_paren - 1;
+                            let type_idx = open_paren - 2;
+                            if let (Tok::Ident(name), Tok::Ident(_)) =
+                                (&items[name_idx].tok, &items[type_idx].tok)
+                            {
+                                defs.push(FunctionDef {
+                                    name: name.clone(),
+                                    def_start: type_idx,
+                                    body_close,
+                                });
+                            }
+                        }
+                    }
+                }
+                i = close;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    defs
+}
+
+/// Removes every function definition unreachable from `main`/
+/// `mainImage` — see the section comment above for the full safety
+/// argument (call-graph reachability, why overloads are tracked by
+/// name together, why an unrecognized entry point means declining the
+/// whole pass rather than guessing).
+pub fn eliminate_dead_functions(items: Vec<Item>, stats: &mut AggressiveStats) -> Vec<Item> {
+    let defs = find_function_definitions(&items);
+    if defs.is_empty() {
+        return items;
+    }
+
+    let names: HashSet<String> = defs.iter().map(|d| d.name.clone()).collect();
+    let roots: Vec<String> = ["main", "mainImage"]
+        .into_iter()
+        .filter(|r| names.contains(*r))
+        .map(|r| r.to_string())
+        .collect();
+    if roots.is_empty() {
+        return items;
+    }
+
+    let mut calls: HashMap<String, HashSet<String>> = HashMap::new();
+    for def in &defs {
+        let entry = calls.entry(def.name.clone()).or_default();
+        for item in &items[def.def_start..=def.body_close] {
+            if let Tok::Ident(callee) = &item.tok {
+                if names.contains(callee) {
+                    entry.insert(callee.clone());
+                }
+            }
+        }
+    }
+
+    let mut reachable: HashSet<String> = HashSet::new();
+    let mut queue: Vec<String> = roots;
+    while let Some(name) = queue.pop() {
+        if !reachable.insert(name.clone()) {
+            continue;
+        }
+        if let Some(callees) = calls.get(&name) {
+            for callee in callees {
+                if !reachable.contains(callee) {
+                    queue.push(callee.clone());
+                }
+            }
+        }
+    }
+
+    let mut dead_ranges: Vec<(usize, usize)> = defs
+        .iter()
+        .filter(|d| !reachable.contains(&d.name))
+        .map(|d| (d.def_start, d.body_close))
+        .collect();
+    if dead_ranges.is_empty() {
+        return items;
+    }
+    dead_ranges.sort_unstable();
+
+    let mut out = Vec::with_capacity(items.len());
+    let mut i = 0;
+    let mut dead_iter = dead_ranges.iter().peekable();
+    while i < items.len() {
+        if let Some((start, end)) = dead_iter.peek() {
+            if *start == i {
+                stats.dead_functions_removed += 1;
+                i = end + 1;
+                dead_iter.next();
+                continue;
             }
         }
         out.push(items[i].clone());

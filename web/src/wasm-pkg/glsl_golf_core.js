@@ -65,10 +65,11 @@ export function golf_json(source, aggressive) {
  * @param {boolean} strip_redundant_braces
  * @param {boolean} strip_redundant_parens
  * @param {boolean} strip_duplicate_precision
+ * @param {boolean} eliminate_dead_functions
  * @param {string} protected_names
  * @returns {string}
  */
-export function golf_json_protected(source, eliminate_dead_locals, eliminate_dead_stores, fold_constants, reduce_constant_vectors, strip_trailing_void_return, compound_assignments, increment_decrement, ternary_from_if_else, merge_declarations, strip_redundant_braces, strip_redundant_parens, strip_duplicate_precision, protected_names) {
+export function golf_json_protected(source, eliminate_dead_locals, eliminate_dead_stores, fold_constants, reduce_constant_vectors, strip_trailing_void_return, compound_assignments, increment_decrement, ternary_from_if_else, merge_declarations, strip_redundant_braces, strip_redundant_parens, strip_duplicate_precision, eliminate_dead_functions, protected_names) {
     let deferred3_0;
     let deferred3_1;
     try {
@@ -76,7 +77,7 @@ export function golf_json_protected(source, eliminate_dead_locals, eliminate_dea
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passStringToWasm0(protected_names, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.golf_json_protected(ptr0, len0, eliminate_dead_locals, eliminate_dead_stores, fold_constants, reduce_constant_vectors, strip_trailing_void_return, compound_assignments, increment_decrement, ternary_from_if_else, merge_declarations, strip_redundant_braces, strip_redundant_parens, strip_duplicate_precision, ptr1, len1);
+        const ret = wasm.golf_json_protected(ptr0, len0, eliminate_dead_locals, eliminate_dead_stores, fold_constants, reduce_constant_vectors, strip_trailing_void_return, compound_assignments, increment_decrement, ternary_from_if_else, merge_declarations, strip_redundant_braces, strip_redundant_parens, strip_duplicate_precision, eliminate_dead_functions, ptr1, len1);
         deferred3_0 = ret[0];
         deferred3_1 = ret[1];
         return getStringFromWasm0(ret[0], ret[1]);

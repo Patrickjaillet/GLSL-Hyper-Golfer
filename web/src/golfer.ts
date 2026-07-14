@@ -576,6 +576,7 @@ export interface AggressiveStats {
   ternariesFromIfElse: number;
   redundantParensRemoved: number;
   duplicatePrecisionRemoved: number;
+  deadFunctionsRemoved: number;
 }
 
 function newAggressiveStats(): AggressiveStats {
@@ -592,6 +593,7 @@ function newAggressiveStats(): AggressiveStats {
     ternariesFromIfElse: 0,
     redundantParensRemoved: 0,
     duplicatePrecisionRemoved: 0,
+    deadFunctionsRemoved: 0,
   };
 }
 
@@ -1655,6 +1657,124 @@ function eliminateDeadStores(items: Token[], stats: AggressiveStats): Token[] {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Dead function elimination (ROADMAP.md Phase 1.2). Mirrors
+// aggressive.rs's dead-function section exactly — see there for the
+// full reasoning (why the "return type" slot isn't validated against
+// a type-keyword set, why overloads share a call-graph node, why
+// declining entirely when neither `main` nor `mainImage` is defined is
+// the only safe choice for a Common-only buffer with no entry point of
+// its own).
+// ---------------------------------------------------------------------------
+
+/** Mirror image of `skipBalanced`: scans backward from a `)` at `closeParen` for its matching `(`, or -1 if unbalanced. */
+function matchingOpenParen(items: Token[], closeParen: number): number {
+  if (!isPunct(items[closeParen], ")")) return -1;
+  let depth = 0;
+  let i = closeParen;
+  for (;;) {
+    const t = items[i];
+    if (!t) return -1;
+    if (t.kind === "punct" && t.text === ")") depth++;
+    else if (t.kind === "punct" && t.text === "(") {
+      depth--;
+      if (depth === 0) return i;
+    }
+    if (i === 0) return -1;
+    i--;
+  }
+}
+
+interface FunctionDef {
+  name: string;
+  defStart: number;
+  bodyClose: number;
+}
+
+/** Finds every top-level `<type> <name>(...){...}` function definition, in source order. */
+function findFunctionDefinitions(items: Token[]): FunctionDef[] {
+  const defs: FunctionDef[] = [];
+  let i = 0;
+  while (i < items.length) {
+    if (isPunct(items[i], "{")) {
+      const close = skipBalanced(items, i, "{", "}");
+      if (close !== -1) {
+        const bodyClose = close - 1;
+        if (i >= 1) {
+          const openParen = matchingOpenParen(items, i - 1);
+          if (openParen !== -1 && openParen >= 2) {
+            const nameIdx = openParen - 1;
+            const typeIdx = openParen - 2;
+            const nameTok = items[nameIdx];
+            const typeTok = items[typeIdx];
+            if (nameTok?.kind === "ident" && typeTok?.kind === "ident") {
+              defs.push({ name: nameTok.text, defStart: typeIdx, bodyClose });
+            }
+          }
+        }
+        i = close;
+        continue;
+      }
+    }
+    i++;
+  }
+  return defs;
+}
+
+/** Removes every function definition unreachable from `main`/`mainImage` — see the section comment above. */
+function eliminateDeadFunctions(items: Token[], stats: AggressiveStats): Token[] {
+  const defs = findFunctionDefinitions(items);
+  if (defs.length === 0) return items;
+
+  const names = new Set(defs.map((d) => d.name));
+  const roots = ["main", "mainImage"].filter((r) => names.has(r));
+  if (roots.length === 0) return items;
+
+  const calls = new Map<string, Set<string>>();
+  for (const def of defs) {
+    let entry = calls.get(def.name);
+    if (!entry) {
+      entry = new Set();
+      calls.set(def.name, entry);
+    }
+    for (let k = def.defStart; k <= def.bodyClose; k++) {
+      const t = items[k];
+      if (t.kind === "ident" && names.has(t.text)) entry.add(t.text);
+    }
+  }
+
+  const reachable = new Set<string>();
+  const queue = [...roots];
+  while (queue.length > 0) {
+    const name = queue.pop()!;
+    if (reachable.has(name)) continue;
+    reachable.add(name);
+    for (const callee of calls.get(name) ?? []) {
+      if (!reachable.has(callee)) queue.push(callee);
+    }
+  }
+
+  const deadRanges = defs.filter((d) => !reachable.has(d.name)).map((d): [number, number] => [d.defStart, d.bodyClose]);
+  if (deadRanges.length === 0) return items;
+  deadRanges.sort((a, b) => a[0] - b[0]);
+
+  const out: Token[] = [];
+  let i = 0;
+  let deadIdx = 0;
+  while (i < items.length) {
+    const range = deadRanges[deadIdx];
+    if (range && range[0] === i) {
+      stats.deadFunctionsRemoved++;
+      i = range[1] + 1;
+      deadIdx++;
+      continue;
+    }
+    out.push(items[i]);
+    i++;
+  }
+  return out;
+}
+
 /**
  * Merges adjacent declaration statements of the identical type keyword:
  * `float a=1.;float b=2.;` -> `float a=1.,b=2.;`. Only fires when the
@@ -2190,6 +2310,7 @@ export interface AggressiveOptions {
   stripRedundantBraces: boolean;
   stripRedundantParens: boolean;
   stripDuplicatePrecision: boolean;
+  eliminateDeadFunctions: boolean;
 }
 
 export function allAggressiveOptions(on: boolean): AggressiveOptions {
@@ -2206,6 +2327,7 @@ export function allAggressiveOptions(on: boolean): AggressiveOptions {
     stripRedundantBraces: on,
     stripRedundantParens: on,
     stripDuplicatePrecision: on,
+    eliminateDeadFunctions: on,
   };
 }
 
@@ -2343,6 +2465,7 @@ export function golf(
     const before = items;
     if (options.eliminateDeadLocals) items = eliminateDeadLocals(items, aggressiveStats);
     if (options.eliminateDeadStores) items = eliminateDeadStores(items, aggressiveStats);
+    if (options.eliminateDeadFunctions) items = eliminateDeadFunctions(items, aggressiveStats);
     if (options.foldConstants) {
       items = foldConstants(items, aggressiveStats);
       // Same toggle, not a separate one — see the same comment in

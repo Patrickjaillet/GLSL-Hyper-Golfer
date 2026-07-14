@@ -77,6 +77,9 @@ const fr: Dict = {
   "pass.deadStores.label": "écritures mortes",
   "pass.deadStores.title":
     "Supprime une écriture immédiatement écrasée par la suivante, sans lecture entre les deux (x=1.;x=2.; → x=2.;).",
+  "pass.deadFunctions.label": "fonctions mortes",
+  "pass.deadFunctions.title":
+    "Supprime toute fonction jamais atteinte depuis main/mainImage (graphe d'appel). Désactivé automatiquement si aucun des deux n'est présent (ex. code Common seul).",
   "pass.foldConstants.label": "constantes",
   "pass.foldConstants.title": "Replie les opérations *, / et % entre littéraux entiers purs (2*3 → 6).",
   "pass.constantVectors.label": "vecteurs constants",
@@ -207,6 +210,9 @@ const en: Dict = {
   "pass.deadStores.label": "dead stores",
   "pass.deadStores.title":
     "Removes a write immediately overwritten by the next one, with no read in between (x=1.;x=2.; → x=2.;).",
+  "pass.deadFunctions.label": "dead functions",
+  "pass.deadFunctions.title":
+    "Removes any function never reached from main/mainImage (call graph). Automatically inert if neither is present (e.g. Common-only code).",
   "pass.foldConstants.label": "constants",
   "pass.foldConstants.title": "Folds *, / and % operations between plain integer literals (2*3 → 6).",
   "pass.constantVectors.label": "constant vectors",

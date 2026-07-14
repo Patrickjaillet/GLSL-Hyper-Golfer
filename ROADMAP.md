@@ -420,14 +420,67 @@ aller plus vite.
       bundle wasm gzippé stable (~73.0 → ~72.8 KiB, aucune croissance
       notable cette fois, contrairement aux deux items précédents —
       cette passe n'a besoin d'aucun code stdlib supplémentaire).
-- [ ] (P1) **Élimination de fonctions mortes.** Aucune passe ne
-      supprime une fonction entière jamais appelée nulle part (hors
-      `main`/`mainImage`, toujours protégées). Nécessite une analyse
-      d'atteignabilité simple (graphe d'appel construit depuis les
-      identifiants de fonctions, en partant de `mainImage`) — plus
-      complexe qu'un peephole mais reste une passe "safe by
-      construction" une fois le graphe correct : une fonction jamais
-      atteinte ne peut avoir aucun effet observable.
+- [x] (P1) **Élimination de fonctions mortes.** Nouvelle fonction
+      `eliminate_dead_functions` (`aggressive.rs`, interrupteur dédié
+      `eliminate_dead_functions`, case à cocher UI incluse, groupe
+      "Agressif" comme les autres passes structurelles) + miroir TS
+      `eliminateDeadFunctions`. Repère chaque définition de fonction au
+      niveau global (`<type> <nom>(...){...}` — la seule forme possible
+      à ce niveau : un corps de `struct` n'est jamais précédé d'une
+      `)`, et un bloc de contrôle comme `if(...){...}` ne peut jamais
+      apparaître hors d'un corps de fonction en GLSL valide, donc aucune
+      exclusion de mot-clé supplémentaire n'est nécessaire ici,
+      contrairement à `strip_redundant_parens`), construit le graphe
+      d'appel (tout identifiant connu apparaissant dans le corps d'une
+      fonction = un appel vers elle), puis fait un parcours
+      d'atteignabilité depuis `main`/`mainImage` (celui qui existe
+      réellement). Tout ce qui n'est jamais atteint est supprimé
+      entièrement — signature et corps.
+      **Garde critique, la même famille de risque que celle trouvée
+      pour les qualificateurs de précision** : cette passe se **désactive
+      entièrement** si ni `main` ni `mainImage` n'est défini dans le
+      fichier — un buffer Common golfé seul (Phase 4) ne contient que
+      des fonctions utilitaires, aucun point d'entrée à lui ; sans
+      racine connue, tout serait "jamais atteint" et la passe
+      supprimerait silencieusement du code de bibliothèque légitime.
+      Décliner est toujours sûr ; deviner un point d'entrée ne l'est
+      pas. Testé explicitement
+      (`declines_entirely_when_there_is_no_recognized_entry_point`).
+      **Deux fonctions de même nom (surcharge GLSL légale par type de
+      paramètres) sont suivies comme un seul nœud du graphe d'appel et
+      gardées ou supprimées ensemble** — cette passe n'a aucune
+      information de type pour savoir quelle surcharge un site d'appel
+      résout réellement, donc traiter le nom comme atteint dès qu'un
+      appel existe est le choix conservateur et toujours sûr (au pire
+      une surcharge réellement morte survit à côté d'une vivante ;
+      jamais l'inverse). Testé
+      (`keeps_all_overloads_of_a_reachable_name`).
+      Vérifié explicitement que le parcours est une vraie atteignabilité
+      transitive et pas seulement "quelque chose l'appelle-t-il
+      directement" : une paire mutuellement récursive (`deadA` appelle
+      `deadB`, `deadB` appelle `deadA`) mais jamais atteinte depuis
+      `mainImage` est bien supprimée **en entier**, pas seulement la
+      moitié qui n'a "aucun appelant" au sens naïf
+      (`removes_a_mutually_recursive_pair_thats_unreachable_from_any_entry_point`).
+      6 nouveaux tests Rust dédiés (fonction jamais appelée supprimée,
+      fonction appelée directement gardée, fonction atteinte seulement
+      transitivement gardée, paire mutuellement récursive mais
+      inatteignable supprimée en entier, surcharges toutes gardées
+      ensemble, aucun point d'entrée → passe entièrement désactivée) +
+      fixture dédiée `dead_functions.glsl`. Parité Rust/TS/wasm 44/44,
+      `cargo test`/`cargo clippy` (×2) propres, budget de taille (Phase
+      0) : **3902 → 4050 octets** (nouvelle fixture, pas une régression
+      sur l'existant). Suite web complète vérifiée — verte, mais
+      **budget de bundle wasm gzippé désormais nettement plus proche de
+      sa limite** : ~72.8 → ~76.0 KiB sur un budget CI de 80 KiB (marge
+      restante ~5.9 KiB, ~7%) — cette passe elle-même n'ajoute que peu
+      de code, l'essentiel de la croissance vient de `HashMap`/`HashSet`
+      désormais réellement exercés dans le binaire wasm optimisé. **À
+      surveiller de près avant tout item futur qui ajouterait encore du
+      code** (Phase 2 en particulier, qui introduit un vrai modèle
+      d'expression) — le budget CI devra probablement être relevé, ou
+      la taille du binaire wasm activement travaillée, avant d'aller
+      beaucoup plus loin.
 
 ### 1.3 Renommage — pousser la portée plus loin
 - [ ] (P1) **Renommage au niveau du bloc, pas seulement de la

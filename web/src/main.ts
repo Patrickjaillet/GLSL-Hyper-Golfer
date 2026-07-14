@@ -364,6 +364,9 @@ app.innerHTML = `
       <label data-i18n-title="pass.deadStores.title" title="">
         <input type="checkbox" id="pass-dead-stores" checked /><span data-i18n="pass.deadStores.label">écritures mortes</span>
       </label>
+      <label data-i18n-title="pass.deadFunctions.title" title="">
+        <input type="checkbox" id="pass-dead-functions" checked /><span data-i18n="pass.deadFunctions.label">fonctions mortes</span>
+      </label>
       <label data-i18n-title="pass.foldConstants.title" title="">
         <input type="checkbox" id="pass-fold-constants" checked /><span data-i18n="pass.foldConstants.label">constantes</span>
       </label>
@@ -456,6 +459,7 @@ const perPassStats = document.getElementById("per-pass-stats")!;
 const golfLevelSelect = document.getElementById("golf-level-select") as HTMLSelectElement;
 const passDeadLocals = document.getElementById("pass-dead-locals") as HTMLInputElement;
 const passDeadStores = document.getElementById("pass-dead-stores") as HTMLInputElement;
+const passDeadFunctions = document.getElementById("pass-dead-functions") as HTMLInputElement;
 const passFoldConstants = document.getElementById("pass-fold-constants") as HTMLInputElement;
 const passConstantVectors = document.getElementById("pass-constant-vectors") as HTMLInputElement;
 const passCompound = document.getElementById("pass-compound") as HTMLInputElement;
@@ -469,6 +473,7 @@ const passTrailingReturn = document.getElementById("pass-trailing-return") as HT
 const passCheckboxes = [
   passDeadLocals,
   passDeadStores,
+  passDeadFunctions,
   passFoldConstants,
   passConstantVectors,
   passCompound,
@@ -1010,6 +1015,7 @@ function currentAggressiveOptions(): AggressiveOptions {
   return {
     eliminateDeadLocals: passDeadLocals.checked,
     eliminateDeadStores: passDeadStores.checked,
+    eliminateDeadFunctions: passDeadFunctions.checked,
     foldConstants: passFoldConstants.checked,
     reduceConstantVectors: passConstantVectors.checked,
     stripTrailingVoidReturn: passTrailingReturn.checked,

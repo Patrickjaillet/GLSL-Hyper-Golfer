@@ -1,8 +1,9 @@
 use crate::aggressive::{
-    compound_assignments, eliminate_dead_locals, eliminate_dead_stores, fold_additive_constants,
-    fold_additive_float_constants, fold_constants, fold_float_constants, increment_decrement,
-    merge_declarations, reduce_constant_vectors, strip_duplicate_precision, strip_redundant_braces,
-    strip_redundant_parens, strip_trailing_void_return, ternary_from_if_else, AggressiveStats, Item,
+    compound_assignments, eliminate_dead_functions, eliminate_dead_locals, eliminate_dead_stores,
+    fold_additive_constants, fold_additive_float_constants, fold_constants, fold_float_constants,
+    increment_decrement, merge_declarations, reduce_constant_vectors, strip_duplicate_precision,
+    strip_redundant_braces, strip_redundant_parens, strip_trailing_void_return, ternary_from_if_else,
+    AggressiveStats, Item,
 };
 use crate::lexer::{tokenize_spaced, Tok};
 use crate::vocab::{
@@ -445,6 +446,7 @@ pub struct AggressiveOptions {
     pub strip_redundant_braces: bool,
     pub strip_redundant_parens: bool,
     pub strip_duplicate_precision: bool,
+    pub eliminate_dead_functions: bool,
 }
 
 impl AggressiveOptions {
@@ -462,6 +464,7 @@ impl AggressiveOptions {
             strip_redundant_braces: true,
             strip_redundant_parens: true,
             strip_duplicate_precision: true,
+            eliminate_dead_functions: true,
         }
     }
 
@@ -479,6 +482,7 @@ impl AggressiveOptions {
             strip_redundant_braces: false,
             strip_redundant_parens: false,
             strip_duplicate_precision: false,
+            eliminate_dead_functions: false,
         }
     }
 }
@@ -675,6 +679,9 @@ pub fn golf_with_protected_names(
         }
         if aggressive.eliminate_dead_stores {
             items = eliminate_dead_stores(items, &mut aggressive_stats);
+        }
+        if aggressive.eliminate_dead_functions {
+            items = eliminate_dead_functions(items, &mut aggressive_stats);
         }
         if aggressive.fold_constants {
             items = fold_constants(items, &mut aggressive_stats);
@@ -1954,5 +1961,86 @@ mod tests {
             "precision highp float;precision highp int;void mainImage(out vec4 a,in vec2 b){a=vec4(1.);}"
         );
         assert_eq!(r.stats.aggressive.duplicate_precision_removed, 0);
+    }
+
+    #[test]
+    fn removes_a_function_never_called_from_mainimage() {
+        let r = golf(
+            "float unused(float x){return x*2.0;}void mainImage(out vec4 fragColor,in vec2 fragCoord){fragColor=vec4(1.0);}",
+            true,
+        );
+        assert_eq!(r.code, "void mainImage(out vec4 a,in vec2 c){a=vec4(1.);}");
+        assert_eq!(r.stats.aggressive.dead_functions_removed, 1);
+    }
+
+    #[test]
+    fn keeps_a_function_called_from_mainimage() {
+        let r = golf(
+            "float helper(float x){return x*2.0;}void mainImage(out vec4 fragColor,in vec2 fragCoord){fragColor=vec4(helper(1.0));}",
+            true,
+        );
+        assert_eq!(
+            r.code,
+            "float a(float b){return b*2.;}void mainImage(out vec4 b,in vec2 c){b=vec4(a(1.));}"
+        );
+        assert_eq!(r.stats.aggressive.dead_functions_removed, 0);
+    }
+
+    #[test]
+    fn keeps_a_function_reachable_only_transitively() {
+        // mainImage calls `a`, which calls `b` -- `b` is never called
+        // *directly* by an entry point, only reachable through the
+        // call graph, and must still survive.
+        let r = golf(
+            "float a(float x){return b(x);}float b(float x){return x*2.0;}void mainImage(out vec4 fragColor,in vec2 fragCoord){fragColor=vec4(a(1.0));}",
+            true,
+        );
+        assert_eq!(
+            r.code,
+            "float b(float a){return c(a);}float c(float a){return a*2.;}void mainImage(out vec4 d,in vec2 e){d=vec4(b(1.));}"
+        );
+        assert_eq!(r.stats.aggressive.dead_functions_removed, 0);
+    }
+
+    #[test]
+    fn removes_a_mutually_recursive_pair_thats_unreachable_from_any_entry_point() {
+        // `dead2` calls `dead1`, and `dead1` has no callers either --
+        // neither is reachable from `mainImage`, so the reachability
+        // walk (not just "does something call it") must remove both,
+        // not just the one with zero callers.
+        let r = golf(
+            "float dead1(){return 1.0;}float dead2(){return dead1();}void mainImage(out vec4 fragColor,in vec2 fragCoord){fragColor=vec4(1.0);}",
+            true,
+        );
+        assert_eq!(r.code, "void mainImage(out vec4 b,in vec2 d){b=vec4(1.);}");
+        assert_eq!(r.stats.aggressive.dead_functions_removed, 2);
+    }
+
+    #[test]
+    fn keeps_all_overloads_of_a_reachable_name() {
+        // No type information here to tell which overload a call site
+        // resolves to, so a call to `f` conservatively keeps *every*
+        // definition named `f` -- never guesses which one is "the"
+        // live overload.
+        let r = golf(
+            "float f(float x){return x;}float f(vec2 x){return x.x;}void mainImage(out vec4 fragColor,in vec2 fragCoord){fragColor=vec4(f(1.0));}",
+            true,
+        );
+        assert_eq!(
+            r.code,
+            "float b(float a){return a;}float b(vec2 a){return a.x;}void mainImage(out vec4 c,in vec2 d){c=vec4(b(1.));}"
+        );
+        assert_eq!(r.stats.aggressive.dead_functions_removed, 0);
+    }
+
+    #[test]
+    fn declines_entirely_when_there_is_no_recognized_entry_point() {
+        // A `Common`-only buffer with helper functions but no
+        // `mainImage`/`main` of its own (ROADMAP.md Phase 4) -- there is
+        // no safe root to walk reachability from, so nothing is removed
+        // at all rather than treating every function as dead.
+        let r = golf("float helper(float x){return x*2.0;}", true);
+        assert_eq!(r.code, "float b(float a){return a*2.;}");
+        assert_eq!(r.stats.aggressive.dead_functions_removed, 0);
     }
 }
