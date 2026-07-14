@@ -31,9 +31,37 @@ pub struct GolfResult {
     pub stats: GolfStats,
 }
 
+/// Returns the shortest scientific-notation text (`1e6`, `1.23e-4`,
+/// ...) that reparses to the exact same `f32` value as `value`, or
+/// `None` if `value` is zero (scientific notation is never shorter for
+/// zero) — used by `shorten_number` (ROADMAP.md Phase 1.1) to compare
+/// against the plain decimal form and keep whichever is shorter.
+/// Rust's `{value:e}` already produces the shortest round-tripping
+/// decimal in scientific form (same guarantee as its plain `{value}`
+/// Display), formatted exactly as GLSL's exponent syntax allows
+/// (`digit-sequence exponent-part`, no decimal point required — see
+/// the GLSL ES spec's `floating-constant` grammar): no explicit `+` on
+/// a positive exponent, lowercase `e`. The round-trip check is a cheap
+/// safety net, not expected to ever actually fail.
+fn shortest_scientific_form(value: f32) -> Option<String> {
+    if value == 0.0 {
+        return None;
+    }
+    let text = format!("{value:e}");
+    if text.parse::<f32>() != Ok(value) {
+        return None;
+    }
+    Some(text)
+}
+
 /// Shortens a numeric literal's text without changing its value:
-/// `0.5` -> `.5`, `2.0` -> `2.`, `3.100` -> `3.1`, `1.0e5` untouched
-/// in the exponent (only the mantissa is normalised).
+/// `0.5` -> `.5`, `2.0` -> `2.`, `3.100` -> `3.1`, `1.0e5` untouched in
+/// the exponent (only the mantissa is normalised). For a literal that
+/// doesn't already use an exponent, also compares the plain decimal
+/// form against scientific notation (`1000000.` vs `1e6`,
+/// `.0001` vs `1e-4`) and keeps whichever is shorter (ROADMAP.md Phase
+/// 1.1) — re-deriving an optimal exponent for a literal that already
+/// has one is left out of scope for this first version.
 fn shorten_number(raw: &str) -> String {
     // Split off trailing type suffix (u/U/f/F) and exponent, if any.
     let mut mantissa = raw;
@@ -69,6 +97,22 @@ fn shorten_number(raw: &str) -> String {
             result = format!("{int_part}.{trimmed_frac}");
         }
     }
+
+    // Only for literals that are *already* float-typed (contain a `.`)
+    // — a bare integer like `1000000` must never become `1e6`: that
+    // would silently change its GLSL type from `int` to `float`
+    // (breaking e.g. an array size or a loop counter that requires an
+    // int), even though the numeric value is unchanged.
+    if exponent.is_empty() && mantissa.contains('.') {
+        if let Ok(value) = mantissa.parse::<f32>() {
+            if let Some(sci) = shortest_scientific_form(value) {
+                if sci.len() < result.len() {
+                    result = sci;
+                }
+            }
+        }
+    }
+
     format!("{result}{exponent}{suffix}")
 }
 
@@ -1731,14 +1775,17 @@ mod tests {
 
     #[test]
     fn refuses_to_fold_a_float_multiplication_that_overflows_to_infinity() {
+        // The safe pipeline's number-shortening (ROADMAP.md Phase 1.1)
+        // now shortens this literal to `1e30` before the aggressive
+        // pass even runs — which then also makes it ineligible for
+        // folding for an *additional*, independent reason
+        // (`parse_plain_float` declines any literal with an exponent).
+        // Either reason alone is enough to decline; both hold here.
         let r = golf(
             "void f(){float a=999999999999999999999999999999.0*999999999999999999999999999999.0;foo(a);}",
             true,
         );
-        assert_eq!(
-            r.code,
-            "void b(){float a=999999999999999999999999999999.*999999999999999999999999999999.;foo(a);}"
-        );
+        assert_eq!(r.code, "void b(){float a=1e30*1e30;foo(a);}");
         assert_eq!(r.stats.aggressive.constants_folded, 0);
     }
 
@@ -1773,5 +1820,62 @@ mod tests {
         let r = golf("void f(){float a=0.1+0.2;foo(a);}", true);
         assert_eq!(r.code, "void b(){float a=0.3;foo(a);}");
         assert_eq!(r.stats.aggressive.constants_folded, 1);
+    }
+
+    #[test]
+    fn shortens_a_large_whole_number_to_scientific_notation() {
+        // "1000000." (8 chars) vs "1e6" (3 chars) — scientific wins.
+        // Uses the safe pipeline only (no `-a`): this is number
+        // shortening, not aggressive constant folding.
+        let r = golf("void f(){float a=1000000.0;foo(a);}", false);
+        assert_eq!(r.code, "void b(){float a=1e6;foo(a);}");
+        assert_eq!(r.stats.numbers_shortened, 1);
+    }
+
+    #[test]
+    fn shortens_a_small_fraction_to_scientific_notation() {
+        // ".0001" (5 chars) vs "1e-4" (4 chars) — scientific wins.
+        let r = golf("void f(){float a=0.0001;foo(a);}", false);
+        assert_eq!(r.code, "void b(){float a=1e-4;foo(a);}");
+    }
+
+    #[test]
+    fn keeps_decimal_form_when_it_is_already_shorter() {
+        // "123456." (7 chars) vs "1.23456e5" (9 chars) — decimal wins.
+        let r = golf("void f(){float a=123456.0;foo(a);}", false);
+        assert_eq!(r.code, "void b(){float a=123456.;foo(a);}");
+    }
+
+    #[test]
+    fn keeps_decimal_form_on_an_exact_tie() {
+        // ".000123" and "1.23e-4" are both 7 characters — ties favor
+        // the plain decimal form (strict `<` comparison, not `<=`).
+        let r = golf("void f(){float a=0.000123;foo(a);}", false);
+        assert_eq!(r.code, "void b(){float a=.000123;foo(a);}");
+    }
+
+    #[test]
+    fn never_converts_a_bare_integer_to_scientific_notation() {
+        // Critical guard: `1000000` (an `int` literal, no `.`) must
+        // never become `1e6` — that would silently change its GLSL
+        // type from `int` to `float`, breaking e.g. an array size or a
+        // loop counter that requires an `int`.
+        let r = golf("void f(){int a[1000000];foo(a[0]);}", false);
+        assert_eq!(r.code, "void b(){int a[1000000];foo(a[0]);}");
+        assert_eq!(r.stats.numbers_shortened, 0);
+    }
+
+    #[test]
+    fn leaves_a_literal_that_already_has_an_exponent_untouched_by_this_comparison() {
+        // Out of scope for this first version: re-deriving a shorter
+        // exponent for a literal that already uses one.
+        let r = golf("void f(){float a=1.5e10;foo(a);}", false);
+        assert_eq!(r.code, "void b(){float a=1.5e10;foo(a);}");
+    }
+
+    #[test]
+    fn scientific_notation_correctly_carries_a_type_suffix() {
+        let r = golf("void f(){float a=1000000.0f;foo(a);}", false);
+        assert_eq!(r.code, "void b(){float a=1e6f;foo(a);}");
     }
 }

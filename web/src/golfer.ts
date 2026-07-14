@@ -221,6 +221,32 @@ export function tokenize(src: string): Token[] {
 // Number shortening
 // ---------------------------------------------------------------------------
 
+/**
+ * Returns the shortest scientific-notation text (`1e6`, `1.23e-4`, ...)
+ * that reparses to the exact same emulated-`f32` value as `value`, or
+ * null if `value` is zero — mirrors
+ * `golfer.rs::shortest_scientific_form`. JS has no built-in "shortest
+ * round-trip for f32" formatter (`Number.prototype.toExponential()` is
+ * calibrated for f64, and gives noticeably longer, non-matching output
+ * for values that started life as f32 — see the section comment on the
+ * float-folding functions above for the general f32-in-JS caveat), so
+ * this brute-forces it: try increasing significant-digit counts and
+ * keep the first (fewest-digit) one whose reparsed-then-refrounded
+ * value matches exactly. `f32` never needs more than 9 significant
+ * decimal digits to round-trip, so the loop bound is a safe upper
+ * bound, not an arbitrary cutoff.
+ */
+function shortestScientificForm(value: number): string | null {
+  if (value === 0) return null;
+  for (let precision = 1; precision <= 9; precision++) {
+    const candidate = value.toExponential(precision - 1);
+    if (Math.fround(Number.parseFloat(candidate)) === value) {
+      return candidate.replace("e+", "e");
+    }
+  }
+  return null;
+}
+
 /** Shortens a numeric literal without changing its value. */
 export function shortenNumber(raw: string): string {
   let mantissa = raw;
@@ -256,6 +282,23 @@ export function shortenNumber(raw: string): string {
       result = `${intPart}.${trimmedFrac}`;
     }
   }
+
+  // Only for literals that are *already* float-typed (contain a `.`)
+  // — a bare integer like `1000000` must never become `1e6`: that
+  // would silently change its GLSL type from int to float (breaking
+  // e.g. an array size or a loop counter that requires an int), even
+  // though the numeric value is unchanged. Mirrors the same guard in
+  // golfer.rs::shorten_number.
+  if (exponent === "" && mantissa.includes(".")) {
+    const value = Math.fround(Number.parseFloat(mantissa));
+    if (Number.isFinite(value)) {
+      const sci = shortestScientificForm(value);
+      if (sci !== null && sci.length < result.length) {
+        result = sci;
+      }
+    }
+  }
+
   return `${result}${exponent}${suffix}`;
 }
 

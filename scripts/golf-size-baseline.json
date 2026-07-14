@@ -1,8 +1,8 @@
 {
-  "totalBytes": 3732,
+  "totalBytes": 3787,
   "perFixture": {
     "already_broken.glsl": 68,
-    "braces.glsl": 220,
+    "braces.glsl": 219,
     "compound_assign.glsl": 76,
     "constant_folding.glsl": 330,
     "constant_vectors.glsl": 189,
@@ -14,7 +14,7 @@
     "fractal.glsl": 495,
     "increment_decrement.glsl": 160,
     "macro_only_reference.glsl": 97,
-    "numbers_and_ambiguity.glsl": 149,
+    "numbers_and_ambiguity.glsl": 205,
     "parens.glsl": 195,
     "scope_aware_renaming.glsl": 147,
     "struct_safety.glsl": 180,

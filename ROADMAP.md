@@ -230,14 +230,65 @@ aller plus vite.
       que seul l'entier était golfé. Toujours sous le budget CI, mais à
       surveiller : peu de marge reste pour d'autres items de cette
       roadmap qui ajouteraient à leur tour du code stdlib lourd.
-- [ ] (P1) **Notation numérique optimale — comparer les représentations,
-      garder la plus courte.** `shorten_number` ne fait que tailler les
-      zéros ; il ne compare jamais la forme décimale à la forme
-      scientifique équivalente. `1000000.` (9 car.) devrait devenir
-      `1e6` (3 car.) ; `0.0001` (6 car.) devrait devenir `1e-4` (4 car.).
-      Générer les deux formes, comparer la longueur textuelle, garder
-      la plus courte — même valeur `f32` exacte des deux côtés (pas
-      d'approximation, juste un choix de représentation).
+- [x] (P1) **Notation numérique optimale — comparer les représentations,
+      garder la plus courte.** `shorten_number`/`shortenNumber`
+      comparent désormais la forme décimale déjà produite à une forme
+      scientifique équivalente et gardent la plus courte des deux —
+      `1000000.` (8 car.) devient `1e6` (3 car.), `.0001` (5 car.)
+      devient `1e-4` (4 car.), mais `123456.` (7 car.) reste décimal
+      face à `1.23456e5` (9 car., plus long) : comparaison stricte de
+      longueur, pas une préférence a priori pour l'une ou l'autre
+      forme. Sur une égalité exacte de longueur (`.000123` vs
+      `1.23e-4`, 7 caractères chacun), le décimal gagne (comparaison
+      `<` stricte, pas `<=`) plutôt que de changer de forme sans gain
+      réel.
+      **Garde critique, trouvée par raisonnement avant d'écrire le
+      code, pas par un bug en production** : cette comparaison ne
+      s'applique **que si le littéral est déjà typé `float`** (contient
+      un `.` avant tout raccourcissement) — un entier nu comme
+      `1000000` ne doit jamais devenir `1e6`, ce qui changerait
+      silencieusement son type GLSL d'`int` vers `float` (cassant par
+      exemple une taille de tableau ou un compteur de boucle qui exige
+      un `int`), alors même que la valeur numérique reste identique.
+      Testé explicitement (`never_converts_a_bare_integer_to_scientific_notation`).
+      Restreint aux littéraux qui n'ont pas déjà leur propre exposant
+      (`1.5e10` reste inchangé par cette comparaison — en retrouver un
+      exposant plus court est hors du périmètre de cette première
+      version).
+      **Écart Rust/TS supplémentaire, documenté comme celui du
+      repliement flottant** : Rust utilise `{value:e}` (déjà le plus
+      court texte scientifique qui round-trippe exactement, même
+      garantie que `{value}` pour la forme décimale). JavaScript n'a
+      pas d'équivalent : `Number.prototype.toExponential()` est calibré
+      pour un `f64`, pas un `f32` — testé concrètement, il donne des
+      résultats bien plus longs et complètement différents pour une
+      valeur qui est en réalité un `f32` (`0.0001` en `f32` :
+      `toExponential()` natif donne `"9.999999747378752e-5"` quand le
+      texte correct le plus court est `"1e-4"`). Contourné en TS par une
+      recherche par force brute : essayer un nombre croissant de
+      chiffres significatifs via `toExponential(n)` et garder le
+      premier qui round-trippe exactement (`Math.fround` d'un nombre
+      f32 n'a jamais besoin de plus de 9 chiffres significatifs) —
+      vérifié que cette approche reproduit exactement les mêmes choix
+      que Rust sur une douzaine de valeurs de test avant de l'intégrer.
+      6 nouveaux tests Rust dédiés (grand nombre entier→scientifique,
+      petite fraction→scientifique, forme décimale gardée quand plus
+      courte, égalité stricte gardant le décimal, entier nu jamais
+      converti, littéral à exposant déjà présent laissé intact, suffixe
+      de type correctement reporté) + 1 test existant mis à jour (pas
+      une régression : un très grand littéral flottant golfe désormais
+      en `1e30` par le pipeline sûr avant même que la passe agressive
+      ne s'exécute, ce qui la rend de toute façon non repliable pour
+      une seconde raison indépendante — `parse_plain_float` refuse tout
+      littéral à exposant). Fixture `numbers_and_ambiguity.glsl`
+      étendue avec les mêmes cas. Parité Rust/TS/wasm 40/40, `cargo
+      test`/`cargo clippy` (×2) propres, budget de taille (Phase 0) :
+      **3732 → 3787 octets** (nouvelles lignes de fixture, pas une
+      régression sur l'existant). Suite web complète vérifiée — verte,
+      budget de bundle wasm gzippé continue de se resserrer (~70.8 KiB
+      → ~73.0 KiB sur un budget CI de 80 KiB, même cause que l'item
+      précédent : plus de code de formatage/parsing `f32` correctement
+      arrondi désormais lié dans le binaire).
 - [ ] (P2) **Constantes GLSL `const` scalaires simples.** Propager la
       valeur d'un `const float PI=3.14159;` dans les usages qui suivent
       **seulement** si strictement adjacent au même schéma de sûreté

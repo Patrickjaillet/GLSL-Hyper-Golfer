@@ -12,5 +12,9 @@ float f(float x, float y) {
     float g = x - -y;   // must never become x--y
     float h = x - - -y;
     float i = x++ + y;
-    return a + b + c + d + e + g + h + i;
+    float j = 1000000.0;   // shorter as 1e6
+    float k = 0.0001;      // shorter as 1e-4
+    float l = 123456.0;    // stays decimal (shorter than 1.23456e5)
+    int m[1000000];        // must stay a bare int, never 1e6
+    return a + b + c + d + e + g + h + i + j + k + l + float(m[0]);
 }
