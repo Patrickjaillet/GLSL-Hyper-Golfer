@@ -1,8 +1,8 @@
 use crate::aggressive::{
     compound_assignments, eliminate_dead_locals, eliminate_dead_stores, fold_additive_constants,
     fold_additive_float_constants, fold_constants, fold_float_constants, increment_decrement,
-    merge_declarations, reduce_constant_vectors, strip_redundant_braces, strip_redundant_parens,
-    strip_trailing_void_return, ternary_from_if_else, AggressiveStats, Item,
+    merge_declarations, reduce_constant_vectors, strip_duplicate_precision, strip_redundant_braces,
+    strip_redundant_parens, strip_trailing_void_return, ternary_from_if_else, AggressiveStats, Item,
 };
 use crate::lexer::{tokenize_spaced, Tok};
 use crate::vocab::{
@@ -444,6 +444,7 @@ pub struct AggressiveOptions {
     pub merge_declarations: bool,
     pub strip_redundant_braces: bool,
     pub strip_redundant_parens: bool,
+    pub strip_duplicate_precision: bool,
 }
 
 impl AggressiveOptions {
@@ -460,6 +461,7 @@ impl AggressiveOptions {
             merge_declarations: true,
             strip_redundant_braces: true,
             strip_redundant_parens: true,
+            strip_duplicate_precision: true,
         }
     }
 
@@ -476,6 +478,7 @@ impl AggressiveOptions {
             merge_declarations: false,
             strip_redundant_braces: false,
             strip_redundant_parens: false,
+            strip_duplicate_precision: false,
         }
     }
 }
@@ -710,6 +713,9 @@ pub fn golf_with_protected_names(
         }
         if aggressive.strip_redundant_parens {
             items = strip_redundant_parens(items, &mut aggressive_stats);
+        }
+        if aggressive.strip_duplicate_precision {
+            items = strip_duplicate_precision(items, &mut aggressive_stats);
         }
         if aggressive.strip_trailing_void_return {
             items = strip_trailing_void_return(items, &mut aggressive_stats);
@@ -1877,5 +1883,76 @@ mod tests {
     fn scientific_notation_correctly_carries_a_type_suffix() {
         let r = golf("void f(){float a=1000000.0f;foo(a);}", false);
         assert_eq!(r.code, "void b(){float a=1e6f;foo(a);}");
+    }
+
+    #[test]
+    fn strips_an_exact_duplicate_precision_statement() {
+        let r = golf(
+            "precision highp float;precision highp float;void mainImage(out vec4 fragColor,in vec2 fragCoord){fragColor=vec4(1.0);}",
+            true,
+        );
+        assert_eq!(
+            r.code,
+            "precision highp float;void mainImage(out vec4 a,in vec2 b){a=vec4(1.);}"
+        );
+        assert_eq!(r.stats.aggressive.duplicate_precision_removed, 1);
+    }
+
+    #[test]
+    fn collapses_a_triple_duplicate_precision_statement_to_one() {
+        let r = golf(
+            "precision highp float;precision highp float;precision highp float;void mainImage(out vec4 fragColor,in vec2 fragCoord){fragColor=vec4(1.0);}",
+            true,
+        );
+        assert_eq!(
+            r.code,
+            "precision highp float;void mainImage(out vec4 a,in vec2 b){a=vec4(1.);}"
+        );
+        assert_eq!(r.stats.aggressive.duplicate_precision_removed, 2);
+    }
+
+    #[test]
+    fn keeps_a_single_precision_statement_untouched() {
+        // Critical guard: never strip the *only* precision statement
+        // for a type, even though it might look redundant against this
+        // app's own renderer-injected header — see the section comment
+        // on `strip_duplicate_precision` for why that broader removal
+        // is a real, not hypothetical, compile-error risk in any other
+        // consumer of the golfed text.
+        let r = golf(
+            "precision highp float;void mainImage(out vec4 fragColor,in vec2 fragCoord){fragColor=vec4(1.0);}",
+            true,
+        );
+        assert_eq!(
+            r.code,
+            "precision highp float;void mainImage(out vec4 a,in vec2 b){a=vec4(1.);}"
+        );
+        assert_eq!(r.stats.aggressive.duplicate_precision_removed, 0);
+    }
+
+    #[test]
+    fn keeps_precision_statements_that_differ_in_qualifier() {
+        let r = golf(
+            "precision highp float;precision mediump float;void mainImage(out vec4 fragColor,in vec2 fragCoord){fragColor=vec4(1.0);}",
+            true,
+        );
+        assert_eq!(
+            r.code,
+            "precision highp float;precision mediump float;void mainImage(out vec4 a,in vec2 b){a=vec4(1.);}"
+        );
+        assert_eq!(r.stats.aggressive.duplicate_precision_removed, 0);
+    }
+
+    #[test]
+    fn keeps_precision_statements_that_differ_in_type() {
+        let r = golf(
+            "precision highp float;precision highp int;void mainImage(out vec4 fragColor,in vec2 fragCoord){fragColor=vec4(1.0);}",
+            true,
+        );
+        assert_eq!(
+            r.code,
+            "precision highp float;precision highp int;void mainImage(out vec4 a,in vec2 b){a=vec4(1.);}"
+        );
+        assert_eq!(r.stats.aggressive.duplicate_precision_removed, 0);
     }
 }

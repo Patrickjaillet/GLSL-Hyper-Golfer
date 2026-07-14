@@ -94,6 +94,8 @@ const fr: Dict = {
   "pass.braces.title": "Supprime les accolades d'un bloc à instruction unique, protégé contre le dangling-else.",
   "pass.parens.label": "parenthèses",
   "pass.parens.title": "Supprime les parenthèses qui n'entourent qu'une seule expression primaire (jamais celles d'un appel de fonction ou d'un mot-clé de contrôle comme if/while/for).",
+  "pass.dupPrecision.label": "précision dupliquée",
+  "pass.dupPrecision.title": "Supprime un `precision <qualif> <type>;` redéclarant exactement le même qualificatif déjà en vigueur pour ce type (jamais la première/seule déclaration, requise par la spec GLSL pour float en fragment shader).",
   "pass.trailingReturn.label": "return finaux",
   "pass.trailingReturn.title":
     "Supprime un `return;` sans valeur quand c'est la toute dernière instruction d'une fonction void — équivalent à tomber en fin de fonction. Protégé contre le cas piège `if(x)return;` (corps non accolé d'un if).",
@@ -222,6 +224,8 @@ const en: Dict = {
   "pass.braces.title": "Strips braces off a single-statement block, guarded against dangling-else.",
   "pass.parens.label": "parentheses",
   "pass.parens.title": "Strips parentheses that wrap only a single primary expression (never a function call's or a control-flow keyword's like if/while/for).",
+  "pass.dupPrecision.label": "duplicate precision",
+  "pass.dupPrecision.title": "Removes a `precision <qualifier> <type>;` that exactly restates one already in effect for that type (never the first/only declaration, which GLSL requires for float in a fragment shader).",
   "pass.trailingReturn.label": "trailing returns",
   "pass.trailingReturn.title":
     "Removes a valueless `return;` when it's the very last statement of a void function — equivalent to falling off the end. Guarded against the `if(x)return;` trap (an unbraced if's own body).",

@@ -575,6 +575,7 @@ export interface AggressiveStats {
   incrementsDecrements: number;
   ternariesFromIfElse: number;
   redundantParensRemoved: number;
+  duplicatePrecisionRemoved: number;
 }
 
 function newAggressiveStats(): AggressiveStats {
@@ -590,6 +591,7 @@ function newAggressiveStats(): AggressiveStats {
     incrementsDecrements: 0,
     ternariesFromIfElse: 0,
     redundantParensRemoved: 0,
+    duplicatePrecisionRemoved: 0,
   };
 }
 
@@ -2042,6 +2044,62 @@ function stripRedundantParens(items: Token[], stats: AggressiveStats): Token[] {
 }
 
 // ---------------------------------------------------------------------------
+// Duplicate precision-qualifier stripping (ROADMAP.md Phase 1.2).
+//
+// Mirrors aggressive.rs's duplicate-precision section exactly — see
+// there for the full reasoning. Short version: GLSL ES fragment
+// shaders have no default precision for `float`, so removing the
+// *only* `precision <qualifier> float;` statement for a type actually
+// used in the shader is a real compile-error risk in whatever
+// environment the golfed text ends up in — this app's own renderer
+// happens to inject its own precision header, but the golfing engine
+// can't assume that about every consumer. What's unconditionally safe
+// regardless of destination: dropping an *exact duplicate*
+// restatement of a precision qualifier already in effect for the same
+// type (a real, not hypothetical, occurrence here specifically, since
+// `main.ts::golfProject` concatenates Common code in front of each
+// buffer's own body before golfing — ROADMAP.md Phase 4).
+// ---------------------------------------------------------------------------
+
+/** Matches `precision <highp|mediump|lowp> <type> ;` starting at `i` and returns the index just past the `;`, or null if it doesn't match there. */
+function matchPrecisionStatement(items: Token[], i: number): number | null {
+  if (items[i]?.text !== "precision") return null;
+  const qualifier = items[i + 1];
+  if (!qualifier || !["highp", "mediump", "lowp"].includes(qualifier.text)) return null;
+  const typeTok = items[i + 2];
+  if (!typeTok || typeTok.kind !== "ident") return null;
+  if (!isPunct(items[i + 3], ";")) return null;
+  return i + 4;
+}
+
+/**
+ * Drops a `precision <qualifier> <type>;` global directive when an
+ * identical one (same qualifier, same type) already appeared earlier
+ * in the file. The *first* occurrence of any precision statement is
+ * always kept, no matter what qualifier or type it names.
+ */
+function stripDuplicatePrecision(items: Token[], stats: AggressiveStats): Token[] {
+  const out: Token[] = [];
+  const seen = new Set<string>();
+  let i = 0;
+  while (i < items.length) {
+    const end = matchPrecisionStatement(items, i);
+    if (end !== null) {
+      const key = `${items[i + 1].text} ${items[i + 2].text}`;
+      if (seen.has(key)) {
+        stats.duplicatePrecisionRemoved++;
+        i = end;
+        continue;
+      }
+      seen.add(key);
+    }
+    out.push(items[i]);
+    i++;
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Layout (re-joining tokens with the minimum safe whitespace)
 // ---------------------------------------------------------------------------
 
@@ -2131,6 +2189,7 @@ export interface AggressiveOptions {
   mergeDeclarations: boolean;
   stripRedundantBraces: boolean;
   stripRedundantParens: boolean;
+  stripDuplicatePrecision: boolean;
 }
 
 export function allAggressiveOptions(on: boolean): AggressiveOptions {
@@ -2146,6 +2205,7 @@ export function allAggressiveOptions(on: boolean): AggressiveOptions {
     mergeDeclarations: on,
     stripRedundantBraces: on,
     stripRedundantParens: on,
+    stripDuplicatePrecision: on,
   };
 }
 
@@ -2299,6 +2359,7 @@ export function golf(
     if (options.mergeDeclarations) items = mergeDeclarations(items, aggressiveStats);
     if (options.stripRedundantBraces) items = stripRedundantBraces(items, aggressiveStats);
     if (options.stripRedundantParens) items = stripRedundantParens(items, aggressiveStats);
+    if (options.stripDuplicatePrecision) items = stripDuplicatePrecision(items, aggressiveStats);
     if (options.stripTrailingVoidReturn) items = stripTrailingVoidReturn(items, aggressiveStats);
     if (itemsEqual(before, items)) break;
   }

@@ -32,6 +32,7 @@ OPTIONS:
     --no-merge              With -a, disable declaration merging.
     --no-braces             With -a, disable redundant-brace stripping.
     --no-parens             With -a, disable redundant-parenthesis stripping.
+    --no-dup-precision      With -a, disable duplicate-precision stripping.
     --diff-only             Print only the stats summary (to stdout in
                              this mode), not the golfed code itself —
                              for scripting. Not a real source diff: the
@@ -59,7 +60,7 @@ fn print_stats(result: &GolfResult, aggressive: bool, to_stdout: bool) {
         result.stats.numbers_shortened,
         if aggressive {
             format!(
-                ", {} locaux morts supprimes, {} ecritures mortes supprimees, {} constantes repliees, {} vecteurs constants reduits, {} return finaux supprimes, {} affectations composees, {} increments/decrements, {} ternaires depuis if/else, {} declarations fusionnees, {} blocs d'accolades supprimes, {} parentheses redondantes supprimees",
+                ", {} locaux morts supprimes, {} ecritures mortes supprimees, {} constantes repliees, {} vecteurs constants reduits, {} return finaux supprimes, {} affectations composees, {} increments/decrements, {} ternaires depuis if/else, {} declarations fusionnees, {} blocs d'accolades supprimes, {} parentheses redondantes supprimees, {} qualificateurs de precision dupliques supprimes",
                 result.stats.aggressive.dead_locals_removed,
                 result.stats.aggressive.dead_stores_removed,
                 result.stats.aggressive.constants_folded,
@@ -71,6 +72,7 @@ fn print_stats(result: &GolfResult, aggressive: bool, to_stdout: bool) {
                 result.stats.aggressive.declarations_merged,
                 result.stats.aggressive.braces_removed,
                 result.stats.aggressive.redundant_parens_removed,
+                result.stats.aggressive.duplicate_precision_removed,
             )
         } else {
             String::new()
@@ -194,6 +196,10 @@ fn main() -> ExitCode {
             }
             "--no-parens" => {
                 options.strip_redundant_parens = false;
+                args.remove(i);
+            }
+            "--no-dup-precision" => {
+                options.strip_duplicate_precision = false;
                 args.remove(i);
             }
             "--diff-only" => {

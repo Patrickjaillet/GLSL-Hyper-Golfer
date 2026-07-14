@@ -374,13 +374,52 @@ aller plus vite.
       mais nécessaire pour que la passe soit réellement activable/
       désactivable par l'utilisateur, au même titre que les 10 passes
       existantes qui suivent toutes ce même schéma une-case-par-passe.
-- [ ] (P1) **Suppression des qualificateurs de précision redondants.**
-      `precision highp float;` etc. sont parfois plus longs que
-      nécessaire une fois la précision par défaut du contexte WebGL2/ES
-      300 prise en compte — à vérifier prudemment (ES 300 a des règles
-      de précision par défaut différentes de ES 100, il faut confirmer
-      qu'aucune n'est requise explicitement dans le contexte de rendu
-      de cette app avant de la supprimer) plutôt que suivre un raccourci.
+- [x] (P1) **Suppression des qualificateurs de précision redondants.**
+      **Recherche faite avant d'écrire du code, comme demandé, et elle a
+      changé le périmètre de l'item** : la version large envisagée à
+      l'origine ("le contexte WebGL2/ES 300 fournit peut-être déjà une
+      précision par défaut") s'est révélée fausse et dangereuse — les
+      spec GLSL ES 1.00 *et* 3.00 (section "Default Precision
+      Qualifiers") sont explicites : un fragment shader n'a **aucune**
+      précision par défaut pour `float`. Une instruction `precision
+      <qualif> float;` (ou un qualificatif équivalent par déclaration)
+      est **obligatoire**, pas une commodité que le compilateur
+      applique en son absence. Le renderer de *cette app*
+      (`renderer.ts`) injecte bien son propre en-tête `precision highp
+      float;` avant chaque shader compilé, ce qui peut faire paraître
+      "redondante" une instruction que l'utilisateur aurait écrite
+      lui-même — mais le moteur de golfing n'a aucun moyen de savoir ou
+      de garantir ça pour l'environnement où le code golfé finira
+      réellement (un contexte WebGL2 nu, un autre hôte façon Shadertoy,
+      un fichier `.frag` autonome). Supprimer la seule instruction de
+      précision pour un type effectivement utilisé casserait
+      silencieusement la compilation dès que le code quitte l'aperçu de
+      cette app — exactement le genre de régression que "Notes de
+      méthode" ci-dessous interdit. **Version large explicitement
+      déclinée**, pas implémentée comme heuristique "généralement sûre".
+      **Ce qui reste sûr sans aucune hypothèse sur la destination** :
+      supprimer une redéclaration **strictement identique** d'un
+      qualificatif déjà en vigueur pour le même type — sémantiquement
+      un no-op garanti par la spec elle-même. Nouvelle fonction
+      `strip_duplicate_precision` (`aggressive.rs`, avec son propre
+      interrupteur dédié `strip_duplicate_precision`, case à cocher UI
+      incluse comme les autres passes structurelles) + miroir TS
+      `stripDuplicatePrecision`. **Pas un cas hypothétique pour cette
+      app spécifiquement** : `main.ts::golfProject` concatène le code
+      Common (qui déclare souvent la précision une fois) devant le
+      corps de chaque buffer avant de golfer (ROADMAP.md Phase 4) — un
+      buffer qui redéclare aussi la même précision (par prudence, ou
+      copié d'ailleurs) produit exactement ce doublon.
+      6 nouveaux tests Rust dédiés (doublon exact supprimé, triplon
+      réduit à un seul, instruction unique jamais touchée, qualificatif
+      différent conservé, type différent conservé) + fixture dédiée
+      `duplicate_precision.glsl`. Parité Rust/TS/wasm 42/42, `cargo
+      test`/`cargo clippy` (×2) propres, budget de taille (Phase 0) :
+      **3787 → 3902 octets** (nouvelle fixture, pas une régression sur
+      l'existant). Suite web complète vérifiée — verte, budget de
+      bundle wasm gzippé stable (~73.0 → ~72.8 KiB, aucune croissance
+      notable cette fois, contrairement aux deux items précédents —
+      cette passe n'a besoin d'aucun code stdlib supplémentaire).
 - [ ] (P1) **Élimination de fonctions mortes.** Aucune passe ne
       supprime une fonction entière jamais appelée nulle part (hors
       `main`/`mainImage`, toujours protégées). Nécessite une analyse

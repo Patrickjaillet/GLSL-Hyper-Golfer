@@ -32,6 +32,7 @@ pub struct AggressiveStats {
     pub increments_decrements: usize,
     pub ternaries_from_if_else: usize,
     pub redundant_parens_removed: usize,
+    pub duplicate_precision_removed: usize,
 }
 
 fn is_unary_prefix(c: char) -> bool {
@@ -1765,6 +1766,93 @@ pub fn strip_redundant_parens(items: Vec<Item>, stats: &mut AggressiveStats) -> 
                         }
                     }
                 }
+            }
+        }
+        out.push(items[i].clone());
+        i += 1;
+    }
+    out
+}
+
+// ---------------------------------------------------------------------
+// Duplicate precision-qualifier stripping (ROADMAP.md Phase 1.2).
+//
+// The roadmap item this answers ("suppression des qualificateurs de
+// précision redondants") is deliberately answered *narrowly* here,
+// after research turned up a real correctness trap in the broad
+// version: GLSL ES fragment shaders (both ES 1.00 and ES 3.00/WebGL2 —
+// the spec's "Default Precision Qualifiers" section) have **no**
+// default precision for `float`. A `precision <qualifier> float;`
+// statement (or an equivalent per-declaration qualifier) is *required*
+// somewhere before `float` is first used, not an optional convenience
+// the compiler falls back to. This app's own renderer happens to
+// inject its own `precision highp float;` header before every shader
+// body it compiles (see `renderer.ts`), which might make a user's own
+// statement *look* redundant when previewed inside this app — but the
+// golfing engine has no way to know that about whatever environment
+// the golfed text is eventually pasted into (a bare WebGL2 context,
+// a different Shadertoy-like host, a standalone `.frag` file). Since
+// removing the only precision statement for a type actually used in
+// the shader risks turning working code into a compile error the
+// moment it leaves this app's own preview, that broad version is
+// declined rather than shipped as a heuristic that's merely "usually"
+// fine — exactly what this codebase's own stated rule (never trade a
+// byte for a correctness regression) rules out.
+//
+// What *is* unconditionally safe, independent of any assumption about
+// the destination environment: an *exact duplicate* restatement of a
+// precision qualifier already in effect for the same type changes
+// nothing (GLSL's own semantics — the second statement just re-asserts
+// the value already set) and can always be dropped. This is a real,
+// not hypothetical, occurrence for this app specifically: multi-buffer
+// Shadertoy projects concatenate `Common` code (which often declares
+// precision once) in front of each buffer's own body before golfing
+// (`main.ts::golfProject`, ROADMAP.md Phase 4) — a buffer that also
+// separately declares the same precision (defensively, or copied from
+// elsewhere) produces exactly this duplicate.
+// ---------------------------------------------------------------------
+
+/// Matches `precision <highp|mediump|lowp> <type> ;` starting at `i`
+/// and returns the index just past the `;`, or `None` if the pattern
+/// doesn't match there.
+fn match_precision_statement(items: &[Item], i: usize) -> Option<usize> {
+    if items.get(i).map(|it| it.text.as_str()) != Some("precision") {
+        return None;
+    }
+    let qualifier_ok = matches!(
+        items.get(i + 1).map(|it| it.text.as_str()),
+        Some("highp" | "mediump" | "lowp")
+    );
+    if !qualifier_ok {
+        return None;
+    }
+    if !matches!(items.get(i + 2).map(|it| &it.tok), Some(Tok::Ident(_))) {
+        return None;
+    }
+    if !matches!(items.get(i + 3).map(|it| &it.tok), Some(Tok::Punct(';'))) {
+        return None;
+    }
+    Some(i + 4)
+}
+
+/// Drops a `precision <qualifier> <type>;` global directive when an
+/// identical one (same qualifier, same type) already appeared earlier
+/// in the file — see the section comment above for why only the exact-
+/// duplicate case is safe to remove unconditionally. The *first*
+/// occurrence of any precision statement is always kept, no matter
+/// what qualifier or type it names.
+pub fn strip_duplicate_precision(items: Vec<Item>, stats: &mut AggressiveStats) -> Vec<Item> {
+    let mut out: Vec<Item> = Vec::with_capacity(items.len());
+    let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    let mut i = 0;
+    while i < items.len() {
+        if let Some(end) = match_precision_statement(&items, i) {
+            let qualifier = items[i + 1].text.clone();
+            let ty = items[i + 2].text.clone();
+            if !seen.insert((qualifier, ty)) {
+                stats.duplicate_precision_removed += 1;
+                i = end;
+                continue;
             }
         }
         out.push(items[i].clone());
