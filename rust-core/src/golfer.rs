@@ -9,24 +9,22 @@ use crate::lexer::{tokenize_spaced, Tok};
 use crate::vocab::{
     builtin_functions, builtin_variables, declaration_introducers, keywords, protected_host_names,
 };
-use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 
-#[derive(Serialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone)]
 pub struct GolfStats {
     pub input_chars: usize,
     pub output_chars: usize,
     pub reduction_pct: f64,
     pub renamed_count: usize,
     pub numbers_shortened: usize,
-    // Deliberately *not* `#[serde(flatten)]` — the web UI (and the
-    // `GolfStats` TS interface it's typed against) expects these under
-    // a nested `stats.aggressive.*`, not spliced into `stats` itself.
+    // Deliberately not spliced into `GolfResult`/JSON output directly —
+    // the web UI (and the `GolfStats` TS interface it's typed against)
+    // expects these under a nested `stats.aggressive.*`.
     pub aggressive: AggressiveStats,
 }
 
-#[derive(Serialize, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct GolfResult {
     pub code: String,
     pub stats: GolfStats,

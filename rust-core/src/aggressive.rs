@@ -18,8 +18,7 @@ pub struct Item {
     pub space_before: bool,
 }
 
-#[derive(Default, Debug, Clone, Copy, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct AggressiveStats {
     pub compound_assignments: usize,
     pub declarations_merged: usize,

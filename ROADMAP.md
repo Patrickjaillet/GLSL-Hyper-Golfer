@@ -547,14 +547,58 @@ aller plus vite.
       `golf-size-budget.mjs`). Suite web complète vérifiée — verte,
       mais **budget de bundle wasm gzippé désormais critique** : ~76.0
       → ~78.6 KiB sur un budget CI de 80 KiB (marge restante ~3.3 KiB,
-      **~4%**). Le prochain changement qui ajoute ne serait-ce qu'un peu
-      de code fera probablement échouer la CI. **Action requise avant
-      de poursuivre cette roadmap** : soit relever le budget CI
-      (`wasm_budget` dans `.github/workflows/ci.yml`), soit investir du
-      temps à réduire la taille du binaire wasm lui-même (`wasm-opt`
-      niveau plus agressif, `panic = "abort"`, `opt-level = "z"`,
-      `codegen-units = 1`, etc. — non exploré ici, hors du périmètre de
-      cet item spécifique).
+      **~4%**). **Traité immédiatement après** (voir l'entrée dédiée
+      juste en dessous) plutôt que reporté — l'utilisateur a
+      explicitement choisi d'investir dans une vraie réduction de la
+      taille du binaire avant de continuer, plutôt que de relever le
+      budget CI ou de laisser filer.
+
+- [x] **(hors-item, traité immédiatement) Réduction réelle de la taille
+      du binaire wasm.** Investigation demandée par l'utilisateur suite
+      au constat ci-dessus. `opt-level="z"` + `lto=true` +
+      `codegen-units=1` + `panic="abort"` étaient déjà en place ; ajouté
+      `strip=true` + un `wasm-opt` explicite (`-Oz
+      --enable-bulk-memory`) dans `[package.metadata.wasm-pack.profile.release]`
+      — gain mesuré : quasi nul (78580 → 78527 octets gzip, wasm-pack
+      appliquait déjà un niveau d'optimisation équivalent par défaut).
+      Profilé avec `twiggy top` (nécessite un build de diagnostic avec
+      `-g` pour garder les noms de fonctions, jamais utilisé pour le
+      binaire livré) : les plus gros postes sont `golf_with_protected_names`
+      lui-même (32 Ko, légitime — c'est tout le pipeline), le formatage
+      `f32`/`flt2dec` (dragon/grisu, ~19 Ko cumulés — nécessaire à la
+      garantie de précision des Phases 1.1, jamais touché), et
+      `serde`/`serde_json` (~3.6 Ko directement attribuables, plus une
+      partie non négligeable du code généré par les macros `#[derive]`
+      non individuellement affichée par `twiggy`).
+      **Action retenue : remplacer `serde`/`serde_json` par une
+      sérialisation JSON écrite à la main**, réservée à la seule
+      surface wasm (`lib.rs::wasm_api`) qui en avait besoin — le CLI
+      natif n'a jamais utilisé JSON. Forme, ordre des champs et
+      camelCase reproduits exactement (vérifié par un test dédié
+      comparant au texte JSON exact que produisait `serde_json` avant
+      la bascule, capturé comme référence figée). Un échappement JSON
+      manuel gère le seul champ qui peut réellement contenir des
+      guillemets/antislashs/caractères de contrôle : `code`, quand une
+      ligne `#pragma`/`#define` (conservée verbatim, jamais retokenisée)
+      en contient — testé avec un vrai run-trip via `JSON.parse` côté
+      Node en plus des tests Rust dédiés. `serde`/`serde_json` retirés
+      entièrement de `Cargo.toml` (plus aucun consommateur dans le
+      crate). **Gain réel et net** : 175551 → 159698 octets bruts
+      (-9%), **78580 → 75007 octets gzip (-4.5%)** — la marge sous le
+      budget CI de 80 Ko remonte de ~3.3 Ko (~4%) à **~6.9 Ko (~8.5%)**,
+      à peu près doublée. 3 nouveaux tests Rust dédiés (forme JSON
+      exacte contre la référence figée, échappement des caractères
+      spéciaux, round-trip réel via `JSON.parse`), `cargo test
+      --features wasm` (seul mode où ce module compile) et `cargo
+      clippy` (×2) propres, `cargo test`/`clippy` sans le flag wasm
+      également propres (le module `wasm_api` entier est
+      `#[cfg(feature="wasm")]`, invisible sinon). Parité Rust/TS/wasm
+      46/46 inchangée (cette bascule ne touche que la sérialisation, pas
+      le golfing lui-même — confirmé par `golf-size-budget.mjs` : "No
+      change vs. baseline", exactement le résultat attendu). Suite web
+      complète vérifiée, y compris `e2e` qui exerce le vrai chemin
+      wasm→JSON→UI de bout en bout, pas seulement les tests Rust
+      isolés.
 - [ ] (P2) **Réutilisation d'un paramètre de fonction comme variable de
       travail** (évite de déclarer une nouvelle locale quand un
       paramètre n'est plus lu après un certain point) — nécessite la

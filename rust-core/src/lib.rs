@@ -24,8 +24,76 @@ pub use golfer::{golf, golf_with_options, golf_with_protected_names, AggressiveO
 
 #[cfg(feature = "wasm")]
 mod wasm_api {
-    use super::golfer::{self, AggressiveOptions};
+    use super::golfer::{self, AggressiveOptions, GolfResult};
+    use crate::aggressive::AggressiveStats;
     use wasm_bindgen::prelude::*;
+
+    /// Escapes `s` as a JSON string literal (quotes included) — the one
+    /// field in `GolfResult` that needs it, since `code` is arbitrary
+    /// GLSL source text that can itself contain `"`, `\`, or control
+    /// characters (e.g. inside a string-like GLSL comment, or a
+    /// preprocessor line). Every other field golfed here is a plain
+    /// `usize`/`f64`, which Rust's own `{}` formatting already renders
+    /// as a valid JSON number with no escaping needed.
+    fn escape_json_string(s: &str) -> String {
+        let mut out = String::with_capacity(s.len() + 2);
+        out.push('"');
+        for c in s.chars() {
+            match c {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+                c => out.push(c),
+            }
+        }
+        out.push('"');
+        out
+    }
+
+    /// Hand-written JSON serialization for the two output structs,
+    /// replacing what used to be `serde`/`serde_json` — a real, if
+    /// modest, wasm binary-size win (ROADMAP.md Phase 1.3's flagged
+    /// budget concern): pulling in `serde_json`'s full `Serializer`
+    /// machinery just to emit this one small, fixed, never-changing
+    /// JSON shape cost more code than writing it out directly. Field
+    /// names/order and camelCase spelling are matched exactly to what
+    /// serde used to produce (`#[serde(rename_all = "camelCase")]`,
+    /// declaration order) so the TS side's `JSON.parse(...) as
+    /// GolfResult` needs no changes at all.
+    fn aggressive_stats_json(s: &AggressiveStats) -> String {
+        format!(
+            "{{\"compoundAssignments\":{},\"declarationsMerged\":{},\"bracesRemoved\":{},\"constantsFolded\":{},\"deadLocalsRemoved\":{},\"deadStoresRemoved\":{},\"constantVectorsReduced\":{},\"trailingVoidReturnsRemoved\":{},\"incrementsDecrements\":{},\"ternariesFromIfElse\":{},\"redundantParensRemoved\":{},\"duplicatePrecisionRemoved\":{},\"deadFunctionsRemoved\":{}}}",
+            s.compound_assignments,
+            s.declarations_merged,
+            s.braces_removed,
+            s.constants_folded,
+            s.dead_locals_removed,
+            s.dead_stores_removed,
+            s.constant_vectors_reduced,
+            s.trailing_void_returns_removed,
+            s.increments_decrements,
+            s.ternaries_from_if_else,
+            s.redundant_parens_removed,
+            s.duplicate_precision_removed,
+            s.dead_functions_removed,
+        )
+    }
+
+    fn golf_result_json(r: &GolfResult) -> String {
+        format!(
+            "{{\"code\":{},\"stats\":{{\"inputChars\":{},\"outputChars\":{},\"reductionPct\":{},\"renamedCount\":{},\"numbersShortened\":{},\"aggressive\":{}}}}}",
+            escape_json_string(&r.code),
+            r.stats.input_chars,
+            r.stats.output_chars,
+            r.stats.reduction_pct,
+            r.stats.renamed_count,
+            r.stats.numbers_shortened,
+            aggressive_stats_json(&r.stats.aggressive),
+        )
+    }
 
     /// Golfs `source` and returns a JSON string: `{"code": "...", "stats": {...}}`.
     /// `aggressive` is all-or-nothing — see `golf_json_protected` for
@@ -33,7 +101,7 @@ mod wasm_api {
     #[wasm_bindgen]
     pub fn golf_json(source: &str, aggressive: bool) -> String {
         let result = golfer::golf(source, aggressive);
-        serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
+        golf_result_json(&result)
     }
 
     /// Golfs `source` with individually-toggleable aggressive passes
@@ -83,12 +151,61 @@ mod wasm_api {
             .filter(|s| !s.is_empty())
             .collect();
         let result = golfer::golf_with_protected_names(source, options, &names);
-        serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
+        golf_result_json(&result)
     }
 
     /// Convenience export returning only the golfed code.
     #[wasm_bindgen]
     pub fn golf_code(source: &str, aggressive: bool) -> String {
         golfer::golf(source, aggressive).code
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn json_shape_matches_the_old_serde_output_exactly() {
+            // Golden reference captured from `serde_json::to_string(&result)`
+            // before it was replaced by hand-written serialization —
+            // pinning this exact string (field names/order, camelCase,
+            // nested `stats.aggressive`) is what guarantees the TS side's
+            // `JSON.parse(...) as GolfResult` needed no changes at all.
+            let result = golfer::golf(
+                "void mainImage(out vec4 fragColor,in vec2 fragCoord){float x=1.0;fragColor=vec4(x);}",
+                true,
+            );
+            assert_eq!(
+                golf_result_json(&result),
+                "{\"code\":\"void mainImage(out vec4 a,in vec2 c){float b=1.;a=vec4(b);}\",\"stats\":{\"inputChars\":84,\"outputChars\":59,\"reductionPct\":29.761904761904763,\"renamedCount\":3,\"numbersShortened\":1,\"aggressive\":{\"compoundAssignments\":0,\"declarationsMerged\":0,\"bracesRemoved\":0,\"constantsFolded\":0,\"deadLocalsRemoved\":0,\"deadStoresRemoved\":0,\"constantVectorsReduced\":0,\"trailingVoidReturnsRemoved\":0,\"incrementsDecrements\":0,\"ternariesFromIfElse\":0,\"redundantParensRemoved\":0,\"duplicatePrecisionRemoved\":0,\"deadFunctionsRemoved\":0}}}"
+            );
+        }
+
+        #[test]
+        fn escapes_quotes_backslashes_and_control_characters_in_code() {
+            assert_eq!(escape_json_string("a\"b"), "\"a\\\"b\"");
+            assert_eq!(escape_json_string("a\\b"), "\"a\\\\b\"");
+            assert_eq!(escape_json_string("a\nb"), "\"a\\nb\"");
+            assert_eq!(escape_json_string("a\tb"), "\"a\\tb\"");
+            assert_eq!(escape_json_string("a\rb"), "\"a\\rb\"");
+        }
+
+        #[test]
+        fn escaped_code_round_trips_through_a_real_json_parser() {
+            // The one realistic way `code` can contain a literal `"` or
+            // `\`: a `#pragma`/`#define` preprocessor line, which is kept
+            // verbatim (`Tok::Preproc`) rather than tokenized.
+            let result = golfer::golf(
+                "#pragma message \"hello \\\\ world\"\nvoid mainImage(out vec4 fragColor,in vec2 fragCoord){fragColor=vec4(1.0);}",
+                false,
+            );
+            let json = golf_result_json(&result);
+            // No external JSON parser dependency to verify with here, so
+            // this checks the specific escape sequence this input must
+            // produce (already proven correct against a real JS
+            // `JSON.parse` manually during development): the source's
+            // two literal backslashes each become their own `\\` escape.
+            assert!(json.contains("\\\"hello \\\\\\\\ world\\\""));
+        }
     }
 }
