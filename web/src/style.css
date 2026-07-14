@@ -829,6 +829,22 @@ canvas#glcanvas-source {
   color: var(--cyan);
 }
 
+.icon-btn.recording {
+  border-color: var(--danger);
+  color: var(--danger);
+  animation: recording-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes recording-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
 .warning-banner {
   margin-top: 8px;
   border: 1px solid var(--amber-dim);

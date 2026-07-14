@@ -315,6 +315,8 @@ app.innerHTML = `
             </div>
             <div class="viewport-controls">
               <button class="icon-btn" id="pause-btn" type="button" data-i18n-title="pause.title" data-i18n-aria-label="pause.ariaLabel" title="" aria-label="">⏸</button>
+              <button class="icon-btn" id="screenshot-btn" type="button" data-i18n-title="screenshot.title" data-i18n-aria-label="screenshot.title" title="" aria-label="">📷</button>
+              <button class="icon-btn" id="record-btn" type="button" data-i18n-title="record.title" data-i18n-aria-label="record.title" title="" aria-label="">⏺</button>
             </div>
           </div>
         </div>
@@ -466,6 +468,8 @@ const resetBtn = document.getElementById("reset-btn") as HTMLButtonElement;
 const copyBtn = document.getElementById("copy-btn") as HTMLButtonElement;
 const prettyToggle = document.getElementById("pretty-toggle") as HTMLInputElement;
 const pauseBtn = document.getElementById("pause-btn") as HTMLButtonElement;
+const screenshotBtn = document.getElementById("screenshot-btn") as HTMLButtonElement;
+const recordBtn = document.getElementById("record-btn") as HTMLButtonElement;
 const fpsValue = document.getElementById("fps-value")!;
 const resValue = document.getElementById("res-value")!;
 const canvas = document.getElementById("glcanvas") as HTMLCanvasElement;
@@ -1221,6 +1225,42 @@ pauseBtn.addEventListener("click", () => {
   pauseBtn.textContent = paused ? "▶" : "⏸";
 });
 
+screenshotBtn.addEventListener("click", () => {
+  // Captures whatever is currently in the canvas's drawing buffer --
+  // works without `preserveDrawingBuffer` because `toBlob` runs
+  // synchronously against the buffer's current contents, before the
+  // next requestAnimationFrame draw call has a chance to touch it.
+  canvas.toBlob((blob) => {
+    if (blob) downloadBlob(blob, `glsl-golf-${Date.now()}.png`);
+  }, "image/png");
+});
+
+let mediaRecorder: MediaRecorder | null = null;
+let recordedChunks: Blob[] = [];
+recordBtn.addEventListener("click", () => {
+  if (mediaRecorder && mediaRecorder.state === "recording") {
+    mediaRecorder.stop();
+    return;
+  }
+  recordedChunks = [];
+  // 30fps is plenty for a shader preview clip and keeps the encoded
+  // file small; the shader itself may render faster, but the capture
+  // stream samples the canvas at this fixed rate regardless.
+  const stream = canvas.captureStream(30);
+  mediaRecorder = new MediaRecorder(stream, { mimeType: "video/webm" });
+  mediaRecorder.ondataavailable = (e) => {
+    if (e.data.size > 0) recordedChunks.push(e.data);
+  };
+  mediaRecorder.onstop = () => {
+    downloadBlob(new Blob(recordedChunks, { type: "video/webm" }), `glsl-golf-${Date.now()}.webm`);
+    recordBtn.textContent = "⏺";
+    recordBtn.classList.remove("recording");
+  };
+  mediaRecorder.start();
+  recordBtn.textContent = "⏹";
+  recordBtn.classList.add("recording");
+});
+
 // ---------------------------------------------------------------------
 // Shadertoy import/export.
 //
@@ -1347,6 +1387,14 @@ function applyShadertoyShader(shader: ShadertoyShader): void {
   }
 }
 
+function downloadBlob(blob: Blob, filename: string): void {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 function exportToShadertoy(): void {
   const passes: ShadertoyRenderpass[] = [];
   if (common.trim()) {
@@ -1385,12 +1433,7 @@ function exportToShadertoy(): void {
   });
 
   const json = JSON.stringify({ Shader: { info: { name: "Exported from GLSL Hyper-Golfer" }, renderpass: passes } }, null, 2);
-  const blob = new Blob([json], { type: "application/json" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "shadertoy-export.json";
-  a.click();
-  URL.revokeObjectURL(a.href);
+  downloadBlob(new Blob([json], { type: "application/json" }), "shadertoy-export.json");
 }
 
 importBtn.addEventListener("click", () => void importFromShadertoy());

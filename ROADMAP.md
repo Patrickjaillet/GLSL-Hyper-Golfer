@@ -752,10 +752,43 @@ Shadertoy a besoin de :
 
 ## 4. Viewport & rendu
 
-- [ ] Passer le fallback WebGL1 en **WebGPU** en option (meilleure
-      fidélité avec les derniers builtins GLSL/`#version 300 es`)
-- [ ] Export **capture d'écran** et **enregistrement vidéo/GIF** du
-      rendu golfé
+- ❌ **Hors de portée — Passer le fallback WebGL1 en WebGPU en option.**
+      Évalué et écarté, pas juste laissé de côté sans y penser :
+      WebGPU ne parle pas GLSL du tout, seulement WGSL — supporter ça
+      demanderait d'écrire un vrai cross-compilateur GLSL→WGSL, un
+      projet à part entière (comparable en ampleur à Naga/Tint, pas une
+      tâche qu'une session peut raisonnablement entamer). Il n'existe
+      pas de chemin "juste changer le backend de rendu" ici : le moteur
+      de golf lui-même est basé sur du GLSL de bout en bout.
+- 🟡 **PARTIEL (14/07/2026) — Export capture d'écran et enregistrement
+      vidéo du rendu golfé.** PNG (`canvas.toBlob`) et vidéo WebM
+      (`MediaRecorder` + `canvas.captureStream(30)`) — tous deux des
+      API navigateur natives, aucune nouvelle dépendance. **GIF
+      délibérément pas fait** : les navigateurs n'ont aucun encodeur
+      GIF natif, il aurait fallu embarquer une bibliothèque
+      d'encodage dédiée pour une valeur ajoutée modeste maintenant que
+      WebM se partage largement sur les plateformes modernes — pas
+      un oubli, un choix de ne pas ajouter cette dépendance pour ce
+      gain-là.
+  - Capture PNG fonctionne **sans** `preserveDrawingBuffer` : `toBlob`
+    tourne de façon synchrone contre le contenu actuel du tampon de
+    rendu, avant que le prochain appel `requestAnimationFrame` n'ait
+    l'occasion d'y toucher.
+  - Bouton d'enregistrement à bascule (⏺ → ⏹), style visuel "pulse"
+    rouge pendant l'enregistrement — respecte automatiquement
+    `prefers-reduced-motion` (règle globale déjà présente dans
+    `style.css` avant cet ajout, s'applique à toute animation CSS sans
+    rien à faire de spécifique ici).
+  - Petit refactor en passant : extrait un helper `downloadBlob()`
+    partagé, réutilisé par l'export Shadertoy existant (qui dupliquait
+    le même code de téléchargement par blob) — cohérence, pas
+    seulement pour la nouvelle fonctionnalité.
+      Vérifié en headless (script jetable, supprimé après usage, 10/10) :
+      capture PNG déclenche un vrai téléchargement non-vide, démarrer
+      l'enregistrement bascule l'état visuel du bouton, l'arrêter
+      déclenche un téléchargement `.webm` non-vide et remet le bouton
+      dans son état normal. Suite complète (tsc, eslint, build, e2e)
+      inchangée.
 - [ ] Réglages de résolution custom et pixel ratio pour tester le rendu
       "tel qu'affiché sur Shadertoy" (qui downscale parfois)
 - ✅ **FAIT (14/07/2026) — Overlay d'erreurs GLSL avec ligne exacte
