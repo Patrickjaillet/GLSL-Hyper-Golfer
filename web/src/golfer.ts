@@ -114,6 +114,32 @@ type TokKind = "preproc" | "ident" | "number" | "punct";
 interface Token {
   kind: TokKind;
   text: string;
+  /**
+   * The token's text exactly as first tokenized from the source, never
+   * updated afterward — mirrors `aggressive.rs`'s `Item.tok` (the
+   * immutable original `Tok`) versus `Item.text` (the current, possibly
+   * renamed/shortened rendering). For a token synthesized by an
+   * aggressive pass (a folded constant, a rewritten operator, ...) this
+   * is simply the same value as `text`, since a freshly computed token
+   * has no "more pristine" form to remember.
+   *
+   * Exists specifically so foldability checks (`parsePlainInt`,
+   * `parsePlainFloat`) can look at the untouched source spelling rather
+   * than `text` — which, by the time an aggressive pass runs, may
+   * already have been rewritten by the safe pipeline's number
+   * shortening (ROADMAP.md Phase 1.1: `1000000.0` -> `1e6`). Reading
+   * `.text` there was a real bug (ROADMAP.md Phase 1.4): a foldable
+   * expression like `1000000.0+0.0` would silently stop folding the
+   * moment its first operand happened to be large enough to trigger
+   * scientific-notation shortening, since `parsePlainFloat` correctly
+   * declines any literal with an exponent — indistinguishable from the
+   * user having typed `1e6` directly, which per Phase 1.1's own stated
+   * scope must *not* be folded. `.original` breaks that ambiguity: it
+   * still reads `1000000.0`, so folding proceeds exactly as it does in
+   * `aggressive.rs` (which never had this bug, since it always folds
+   * from `Item.tok`, never `Item.text`).
+   */
+  original: string;
   /** Was this token separated from the previous one by whitespace/comments? */
   spaceBefore: boolean;
 }
@@ -161,7 +187,7 @@ export function tokenize(src: string): Token[] {
     if (c === "#") {
       const start = i;
       while (i < n && src[i] !== "\n") i++;
-      out.push({ kind: "preproc", text: src.slice(start, i).trim(), spaceBefore: true });
+      out.push({ kind: "preproc", text: src.slice(start, i).trim(), original: src.slice(start, i).trim(), spaceBefore: true });
       spaceBefore = true;
       continue;
     }
@@ -196,7 +222,7 @@ export function tokenize(src: string): Token[] {
         }
       }
       while (i < n && "uUfF".includes(src[i])) i++;
-      out.push({ kind: "number", text: src.slice(start, i), spaceBefore });
+      out.push({ kind: "number", text: src.slice(start, i), original: src.slice(start, i), spaceBefore });
       spaceBefore = false;
       continue;
     }
@@ -204,12 +230,12 @@ export function tokenize(src: string): Token[] {
     if (isAlpha(c)) {
       const start = i;
       while (i < n && isAlnum(src[i])) i++;
-      out.push({ kind: "ident", text: src.slice(start, i), spaceBefore });
+      out.push({ kind: "ident", text: src.slice(start, i), original: src.slice(start, i), spaceBefore });
       spaceBefore = false;
       continue;
     }
     // Punctuation (single char)
-    out.push({ kind: "punct", text: c, spaceBefore });
+    out.push({ kind: "punct", text: c, original: c, spaceBefore });
     spaceBefore = false;
     i++;
   }
@@ -867,18 +893,18 @@ function foldConstants(items: Token[], stats: AggressiveStats): Token[] {
   let i = 0;
   while (i < items.length) {
     const lastOut = out[out.length - 1];
-    const left = lastOut && lastOut.kind === "number" ? parsePlainInt(lastOut.text) : null;
+    const left = lastOut && lastOut.kind === "number" ? parsePlainInt(lastOut.original) : null;
     const opTok = items[i];
     const op = left !== null && opTok && opTok.kind === "punct" && FOLDABLE_OPS.has(opTok.text) ? opTok.text : null;
     const rightTok = items[i + 1];
-    const right = op !== null && rightTok && rightTok.kind === "number" ? parsePlainInt(rightTok.text) : null;
+    const right = op !== null && rightTok && rightTok.kind === "number" ? parsePlainInt(rightTok.original) : null;
 
     if (left !== null && op !== null && right !== null) {
       const value = foldIntOp(left, op, right);
       if (value !== null) {
         out.pop();
         const text = String(value);
-        out.push({ kind: "number", text, spaceBefore: false });
+        out.push({ kind: "number", text, original: text, spaceBefore: false });
         stats.constantsFolded++;
         i += 2;
         continue;
@@ -947,7 +973,7 @@ function additiveChainBoundaryOk(items: Token[], idx: number | null): boolean {
 function tryExtendAdditiveChain(items: Token[], firstNumIdx: number, leadingSign: number): [number, number] | null {
   const firstTok = items[firstNumIdx];
   if (!firstTok || firstTok.kind !== "number") return null;
-  const firstVal = parsePlainInt(firstTok.text);
+  const firstVal = parsePlainInt(firstTok.original);
   if (firstVal === null) return null;
   let value = leadingSign * firstVal;
   let i = firstNumIdx + 1;
@@ -956,7 +982,7 @@ function tryExtendAdditiveChain(items: Token[], firstNumIdx: number, leadingSign
     const opTok = items[i];
     if (!opTok || opTok.kind !== "punct" || (opTok.text !== "+" && opTok.text !== "-")) break;
     const termTok = items[i + 1];
-    const term = termTok && termTok.kind === "number" ? parsePlainInt(termTok.text) : null;
+    const term = termTok && termTok.kind === "number" ? parsePlainInt(termTok.original) : null;
     if (term === null) break;
     const afterTok = items[i + 2];
     const claimedByTighterOp = !!afterTok && afterTok.kind === "punct" && ["*", "/", "%"].includes(afterTok.text);
@@ -980,10 +1006,12 @@ function tryExtendAdditiveChain(items: Token[], firstNumIdx: number, leadingSign
  */
 function pushFoldedInt(out: Token[], value: number): void {
   if (value < 0) {
-    out.push({ kind: "punct", text: "-", spaceBefore: false });
-    out.push({ kind: "number", text: String(-value), spaceBefore: false });
+    out.push({ kind: "punct", text: "-", original: "-", spaceBefore: false });
+    const text = String(-value);
+    out.push({ kind: "number", text, original: text, spaceBefore: false });
   } else {
-    out.push({ kind: "number", text: String(value), spaceBefore: false });
+    const text = String(value);
+    out.push({ kind: "number", text, original: text, spaceBefore: false });
   }
 }
 
@@ -1102,7 +1130,15 @@ function foldFloatOp(a: number, op: string, b: number): number | null {
  * aggressive.rs::format_folded_float — see there for the full argument
  * (why the sign is never embedded in the text, why negative zero is
  * declined rather than handled, why the final round-trip check is
- * cheap insurance rather than load-bearing).
+ * cheap insurance rather than load-bearing). Also applies the same
+ * decimal-vs-scientific comparison `shortenNumber` uses for a literal
+ * straight from the source (ROADMAP.md Phase 1.1) — skipping it here
+ * was a real, if narrow, gap (ROADMAP.md Phase 1.4): without it, a
+ * folded argument like `1000000.0+0.0` kept the plain-decimal spelling
+ * `1000000.` while three other, untouched `1000000.0` literals in the
+ * same `vec4(...)` were independently shortened to `1e6` — same value,
+ * different text, so `reduceConstantVectors`'s plain text-equality
+ * check saw four different-looking arguments and declined to reduce.
  */
 function formatFoldedFloat(value: number): string | null {
   if (!Number.isFinite(value) || Object.is(value, -0)) return null;
@@ -1110,15 +1146,17 @@ function formatFoldedFloat(value: number): string | null {
   let text = String(magnitude);
   if (!text.includes(".") && !text.includes("e")) text += ".";
   if (Math.fround(Number.parseFloat(text)) !== magnitude) return null;
+  const sci = shortestScientificForm(magnitude);
+  if (sci !== null && sci.length < text.length) text = sci;
   return text;
 }
 
 /** Pushes a folded float result, mirroring `pushFoldedInt`/`aggressive.rs::push_folded_float` — `text` must already be `value`'s magnitude as produced by `formatFoldedFloat`. */
 function pushFoldedFloat(out: Token[], value: number, text: string): void {
   if (value < 0) {
-    out.push({ kind: "punct", text: "-", spaceBefore: false });
+    out.push({ kind: "punct", text: "-", original: "-", spaceBefore: false });
   }
-  out.push({ kind: "number", text, spaceBefore: false });
+  out.push({ kind: "number", text, original: text, spaceBefore: false });
 }
 
 /**
@@ -1134,11 +1172,11 @@ function foldFloatConstants(items: Token[], stats: AggressiveStats): Token[] {
   let i = 0;
   while (i < items.length) {
     const lastOut = out[out.length - 1];
-    const left = lastOut && lastOut.kind === "number" ? parsePlainFloat(lastOut.text) : null;
+    const left = lastOut && lastOut.kind === "number" ? parsePlainFloat(lastOut.original) : null;
     const opTok = items[i];
     const isMul = left !== null && !!opTok && opTok.kind === "punct" && opTok.text === "*";
     const rightTok = items[i + 1];
-    const right = isMul && rightTok && rightTok.kind === "number" ? parsePlainFloat(rightTok.text) : null;
+    const right = isMul && rightTok && rightTok.kind === "number" ? parsePlainFloat(rightTok.original) : null;
 
     if (left !== null && right !== null) {
       const value = foldFloatOp(left, "*", right);
@@ -1173,7 +1211,7 @@ function foldFloatConstants(items: Token[], stats: AggressiveStats): Token[] {
 function tryExtendAdditiveFloatChain(items: Token[], firstNumIdx: number, leadingSign: number): [number, number] | null {
   const firstTok = items[firstNumIdx];
   if (!firstTok || firstTok.kind !== "number") return null;
-  const firstVal = parsePlainFloat(firstTok.text);
+  const firstVal = parsePlainFloat(firstTok.original);
   if (firstVal === null) return null;
   let value = leadingSign * firstVal;
   let i = firstNumIdx + 1;
@@ -1182,7 +1220,7 @@ function tryExtendAdditiveFloatChain(items: Token[], firstNumIdx: number, leadin
     const opTok = items[i];
     if (!opTok || opTok.kind !== "punct" || (opTok.text !== "+" && opTok.text !== "-")) break;
     const termTok = items[i + 1];
-    const term = termTok && termTok.kind === "number" ? parsePlainFloat(termTok.text) : null;
+    const term = termTok && termTok.kind === "number" ? parsePlainFloat(termTok.original) : null;
     if (term === null) break;
     const afterTok = items[i + 2];
     const claimedByTighterOp = !!afterTok && afterTok.kind === "punct" && ["*", "/"].includes(afterTok.text);
@@ -1432,8 +1470,8 @@ function compoundAssignments(items: Token[], stats: AggressiveStats): Token[] {
         const end = scanPrimary(items, i + 4);
         if (end !== -1 && isTerminator(items, end)) {
           out.push(a);
-          out.push({ kind: "punct", text: opTok.text, spaceBefore: false });
-          out.push({ kind: "punct", text: "=", spaceBefore: false });
+          out.push({ kind: "punct", text: opTok.text, original: opTok.text, spaceBefore: false });
+          out.push({ kind: "punct", text: "=", original: "=", spaceBefore: false });
           for (let k = i + 4; k < end; k++) out.push(items[k]);
           stats.compoundAssignments++;
           i = end;
@@ -1477,9 +1515,9 @@ function incrementDecrement(items: Token[], stats: AggressiveStats): Token[] {
 
     if (matches) {
       if ((value.text === "1" || value.text === "1.") && isTerminator(items, i + 4)) {
-        out.push({ kind: "punct", text: opTok.text, spaceBefore: a.spaceBefore });
-        out.push({ kind: "punct", text: opTok.text, spaceBefore: false });
-        out.push({ kind: "ident", text: a.text, spaceBefore: false });
+        out.push({ kind: "punct", text: opTok.text, original: opTok.text, spaceBefore: a.spaceBefore });
+        out.push({ kind: "punct", text: opTok.text, original: opTok.text, spaceBefore: false });
+        out.push({ kind: "ident", text: a.text, original: a.original, spaceBefore: false });
         stats.incrementsDecrements++;
         i += 4;
         continue;
@@ -1571,15 +1609,15 @@ function ternaryFromIfElse(items: Token[], stats: AggressiveStats): Token[] {
     const m = tryMatchTernary(items, i);
     if (m) {
       out.push(items[m.identIdx]);
-      out.push({ kind: "punct", text: "=", spaceBefore: false });
-      out.push({ kind: "punct", text: "(", spaceBefore: false });
+      out.push({ kind: "punct", text: "=", original: "=", spaceBefore: false });
+      out.push({ kind: "punct", text: "(", original: "(", spaceBefore: false });
       for (let k = m.cond[0]; k < m.cond[1]; k++) out.push(items[k]);
-      out.push({ kind: "punct", text: ")", spaceBefore: false });
-      out.push({ kind: "punct", text: "?", spaceBefore: false });
+      out.push({ kind: "punct", text: ")", original: ")", spaceBefore: false });
+      out.push({ kind: "punct", text: "?", original: "?", spaceBefore: false });
       for (let k = m.x[0]; k < m.x[1]; k++) out.push(items[k]);
-      out.push({ kind: "punct", text: ":", spaceBefore: false });
+      out.push({ kind: "punct", text: ":", original: ":", spaceBefore: false });
       for (let k = m.y[0]; k < m.y[1]; k++) out.push(items[k]);
-      out.push({ kind: "punct", text: ";", spaceBefore: false });
+      out.push({ kind: "punct", text: ";", original: ";", spaceBefore: false });
       stats.ternariesFromIfElse++;
       i = m.end;
       continue;
@@ -1763,7 +1801,7 @@ function eliminateDeadStores(items: Token[], stats: AggressiveStats): Token[] {
           if (write.isDecl) {
             out.push(items[write.start]);
             out.push(items[write.start + 1]);
-            out.push({ kind: "punct", text: ";", spaceBefore: false });
+            out.push({ kind: "punct", text: ";", original: ";", spaceBefore: false });
           }
           i = write.end;
           continue;
@@ -1925,7 +1963,7 @@ function mergeDeclarations(items: Token[], stats: AggressiveStats): Token[] {
         const canMerge = pendingType === declStart && !!last && isPunct(last, ";");
         if (canMerge) {
           out.pop();
-          out.push({ kind: "punct", text: ",", spaceBefore: false });
+          out.push({ kind: "punct", text: ",", original: ",", spaceBefore: false });
           stats.declarationsMerged++;
           i++;
           continue;
@@ -2584,7 +2622,7 @@ export function golf(
       if (shortened !== t.text) numbersShortened++;
       text = shortened;
     }
-    return { kind: t.kind, text, spaceBefore: t.spaceBefore };
+    return { kind: t.kind, text, original: t.original, spaceBefore: t.spaceBefore };
   });
 
   // Run the whole aggressive pipeline to a fixpoint rather than once

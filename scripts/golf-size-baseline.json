@@ -1,11 +1,12 @@
 {
-  "totalBytes": 4298,
+  "totalBytes": 4407,
   "perFixture": {
     "already_broken.glsl": 68,
     "block_scope_renaming.glsl": 248,
     "braces.glsl": 219,
     "compound_assign.glsl": 76,
     "constant_folding.glsl": 330,
+    "constant_vector_from_folded_values.glsl": 109,
     "constant_vectors.glsl": 189,
     "dead_functions.glsl": 148,
     "dead_locals.glsl": 115,

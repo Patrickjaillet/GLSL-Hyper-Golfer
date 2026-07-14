@@ -1,9 +1,9 @@
 use crate::aggressive::{
     compound_assignments, eliminate_dead_functions, eliminate_dead_locals, eliminate_dead_stores,
     fold_additive_constants, fold_additive_float_constants, fold_constants, fold_float_constants,
-    increment_decrement, merge_declarations, reduce_constant_vectors, strip_duplicate_precision,
-    strip_redundant_braces, strip_redundant_parens, strip_trailing_void_return, ternary_from_if_else,
-    AggressiveStats, Item,
+    increment_decrement, merge_declarations, reduce_constant_vectors, shortest_scientific_form,
+    strip_duplicate_precision, strip_redundant_braces, strip_redundant_parens, strip_trailing_void_return,
+    ternary_from_if_else, AggressiveStats, Item,
 };
 use crate::lexer::{tokenize_spaced, Tok};
 use crate::vocab::{
@@ -28,29 +28,6 @@ pub struct GolfStats {
 pub struct GolfResult {
     pub code: String,
     pub stats: GolfStats,
-}
-
-/// Returns the shortest scientific-notation text (`1e6`, `1.23e-4`,
-/// ...) that reparses to the exact same `f32` value as `value`, or
-/// `None` if `value` is zero (scientific notation is never shorter for
-/// zero) — used by `shorten_number` (ROADMAP.md Phase 1.1) to compare
-/// against the plain decimal form and keep whichever is shorter.
-/// Rust's `{value:e}` already produces the shortest round-tripping
-/// decimal in scientific form (same guarantee as its plain `{value}`
-/// Display), formatted exactly as GLSL's exponent syntax allows
-/// (`digit-sequence exponent-part`, no decimal point required — see
-/// the GLSL ES spec's `floating-constant` grammar): no explicit `+` on
-/// a positive exponent, lowercase `e`. The round-trip check is a cheap
-/// safety net, not expected to ever actually fail.
-fn shortest_scientific_form(value: f32) -> Option<String> {
-    if value == 0.0 {
-        return None;
-    }
-    let text = format!("{value:e}");
-    if text.parse::<f32>() != Ok(value) {
-        return None;
-    }
-    Some(text)
 }
 
 /// Shortens a numeric literal's text without changing its value:
@@ -1465,6 +1442,50 @@ mod tests {
         let r = golf("void f(){vec3 a=vec3(2*3,2*3,2*3);}", true);
         assert_eq!(r.code, "void a(){vec3 b=vec3(6);}");
         assert_eq!(r.stats.aggressive.constants_folded, 3);
+        assert_eq!(r.stats.aggressive.constant_vectors_reduced, 1);
+    }
+
+    #[test]
+    fn folded_float_additions_feed_constant_vector_reduction() {
+        // ROADMAP.md Phase 1.4: `2.0+1.0` folds to `3.` (Phase 1.1, same
+        // fixpoint iteration, running before `reduce_constant_vectors`)
+        // in every slot before the vector-reduction pass ever looks at
+        // the arguments — this already worked as soon as Phase 1.1
+        // landed, since both passes already ran in the same fixpoint
+        // loop; this test pins that composition explicitly.
+        let r = golf("void f(){vec3 a=vec3(2.0+1.0,2.0+1.0,2.0+1.0);}", true);
+        assert_eq!(r.code, "void a(){vec3 b=vec3(3.);}");
+        assert_eq!(r.stats.aggressive.constant_vectors_reduced, 1);
+    }
+
+    #[test]
+    fn folded_result_and_an_untouched_literal_of_the_same_value_still_match() {
+        // The real gap Phase 1.4 found: `1000000.0+0.0` folds via
+        // `format_folded_float` to the plain decimal text `1000000.`,
+        // while the *other* three identical literals are independently
+        // shortened by `shorten_number`'s scientific-notation comparison
+        // to `1e6` -- same value, two different spellings, so the
+        // vector-reduction pass's plain text-equality check used to see
+        // four different-looking arguments and decline to reduce them.
+        // Fixed by giving `format_folded_float` the identical decimal-
+        // vs-scientific comparison `shorten_number` already applies.
+        let r = golf(
+            "void f(){vec4 a=vec4(1000000.0+0.0,1000000.0,1000000.0,1000000.0);}",
+            true,
+        );
+        assert_eq!(r.code, "void a(){vec4 b=vec4(1e6);}");
+        assert_eq!(r.stats.aggressive.constant_vectors_reduced, 1);
+    }
+
+    #[test]
+    fn a_folded_small_fraction_also_gets_the_scientific_notation_comparison() {
+        // `0.00005+0.00005` folds (f32 addition) to exactly `0.0001`,
+        // which -- like any other float this pass produces now -- is
+        // then compared against scientific notation and shortened to
+        // `1e-4`, matching the literal `0.0001` (independently shortened
+        // the same way by `shorten_number`) closely enough to reduce.
+        let r = golf("void f(){vec2 a=vec2(0.00005+0.00005,0.0001);}", true);
+        assert_eq!(r.code, "void a(){vec2 b=vec2(1e-4);}");
         assert_eq!(r.stats.aggressive.constant_vectors_reduced, 1);
     }
 

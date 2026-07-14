@@ -718,6 +718,46 @@ fn format_folded_float(value: f32) -> Option<String> {
     if text.parse::<f32>() != Ok(magnitude) {
         return None;
     }
+    // Same decimal-vs-scientific comparison `shorten_number` applies to
+    // a literal straight from the source (ROADMAP.md Phase 1.1) — a
+    // *folded* result deserves the identical treatment, and skipping it
+    // here was a real, if narrow, gap (ROADMAP.md Phase 1.4): without
+    // it, `vec4(1000000.0+0.0, 1000000.0, 1000000.0, 1000000.0)` folded
+    // the first argument to the literal text `1000000.` while the other
+    // three (untouched literals) were independently shortened by
+    // `shorten_number` to `1e6` — same value, two different spellings,
+    // so `reduce_constant_vectors`' plain text-equality check saw four
+    // *different* arguments and correctly declined to reduce, even
+    // though all four are provably identical.
+    if let Some(sci) = shortest_scientific_form(magnitude) {
+        if sci.len() < text.len() {
+            text = sci;
+        }
+    }
+    Some(text)
+}
+
+/// Returns the shortest scientific-notation text (`1e6`, `1.23e-4`,
+/// ...) that reparses to the exact same `f32` value as `value`, or
+/// `None` if `value` is zero (scientific notation is never shorter for
+/// zero) — shared by `shorten_number` (the safe pipeline, for literals
+/// straight from the source) and `format_folded_float` above (for a
+/// value this pass just computed). Rust's `{value:e}` already produces
+/// the shortest round-tripping decimal in scientific form (same
+/// guarantee as its plain `{value}` Display), formatted exactly as
+/// GLSL's exponent syntax allows (`digit-sequence exponent-part`, no
+/// decimal point required — see the GLSL ES spec's `floating-constant`
+/// grammar): no explicit `+` on a positive exponent, lowercase `e`. The
+/// round-trip check is a cheap safety net, not expected to ever
+/// actually fail.
+pub fn shortest_scientific_form(value: f32) -> Option<String> {
+    if value == 0.0 {
+        return None;
+    }
+    let text = format!("{value:e}");
+    if text.parse::<f32>() != Ok(value) {
+        return None;
+    }
     Some(text)
 }
 

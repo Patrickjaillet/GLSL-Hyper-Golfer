@@ -605,13 +605,70 @@ aller plus vite.
       même analyse de durée de vie que 1.3 ci-dessus pour être sûr.
 
 ### 1.4 Vecteurs et types composés
-- [ ] (P1) **Étendre `reduce_constant_vectors` aux valeurs repliées
+- [x] (P1) **Étendre `reduce_constant_vectors` aux valeurs repliées
       d'expressions simples**, pas seulement aux littéraux nus déjà
-      identiques textuellement — actuellement `vec3(2.+1.,2.+1.,2.+1.)`
-      n'est réduit que si Phase 1.1 (repliement flottant `+`) tourne
-      *avant* pour produire des littéraux identiques ; sans ça la passe
-      ne voit que du texte différent bien que les valeurs le soient.
-      Dépend directement de 1.1.
+      identiques textuellement.
+      **Déjà satisfait par construction dès que Phase 1.1 a été
+      implémentée** : `fold_float_constants`/`fold_additive_float_constants`
+      tournent déjà *avant* `reduce_constant_vectors` dans la même
+      itération de la boucle à point fixe (Phase 0) — vérifié
+      explicitement (`vec3(2.0+1.0,2.0+1.0,2.0+1.0)` golfe déjà en
+      `vec3(3.)`) plutôt que supposé, avec 2 nouveaux tests Rust dédiés
+      qui pinnent cette composition.
+      **Un vrai gap trouvé en creusant l'item, pas seulement vérifié** :
+      `vec4(1000000.0+0.0, 1000000.0, 1000000.0, 1000000.0)` golfait en
+      `vec4(1000000.,1e6,1e6,1e6)` — **pas réduit**, malgré 4 valeurs
+      identiques. Cause : `format_folded_float` (Phase 1.1) produisait
+      le premier argument replié sous forme décimale brute (`1000000.`)
+      sans jamais le comparer à la notation scientifique, alors que les
+      3 autres littéraux *non repliés* passaient par `shorten_number`
+      (qui, lui, fait cette comparaison) et devenaient `1e6` — même
+      valeur, deux orthographes différentes, donc la vérification
+      d'égalité textuelle de `reduce_constant_vectors` voyait 4
+      arguments "différents". Corrigé en factorisant
+      `shortest_scientific_form` (déplacée de `golfer.rs` vers
+      `aggressive.rs`, dont `golfer.rs::shorten_number` importe
+      désormais la version partagée) et en l'appliquant aussi dans
+      `format_folded_float` — un résultat replié reçoit maintenant
+      exactement le même traitement "décimal vs scientifique, garder le
+      plus court" qu'un littéral brut de la source. Bonus vérifié :
+      `vec2(0.00005+0.00005, 0.0001)` réduit désormais correctement en
+      `vec2(1e-4)` (composition replier→raccourcir→réduire sur trois
+      passes différentes).
+      2 nouveaux tests Rust dédiés au gap trouvé (le cas `vec4` exact,
+      et un cas supplémentaire avec une petite fraction) + fixture
+      dédiée `constant_vector_from_folded_values.glsl`.
+      **Parité Rust/TS cassée puis corrigée en cours de route — la
+      partie la plus significative de cet item** : le miroir TS
+      *déclinait* silencieusement le repliement de `1000000.0+0.0`
+      entièrement (pas seulement le défaut de raccourcissement
+      ci-dessus) parce que `Token` en TS n'a qu'un seul champ `text`
+      (mutable, réécrit par le renommage/raccourcissement de la
+      pipeline sûre) là où `Item` en Rust distingue `tok` (le token
+      lexé, jamais modifié) de `text` (le rendu courant) — les fonctions
+      de repliement TS lisaient `.text`, qui par le moment où la passe
+      agressive tourne a déjà été raccourci en `1e6` par
+      `shortenNumber`, et `parsePlainFloat` refuse à raison tout
+      littéral à exposant (indiscernable d'un `1e6` que l'utilisateur
+      aurait écrit lui-même, hors périmètre de Phase 1.1) — donc plus
+      aucun repliement ne partait jamais pour ce littéral en TS, alors
+      que Rust repliait correctement (il lit toujours `item.tok`, jamais
+      affecté par le raccourcissement de `item.text`). Corrigé en
+      ajoutant un champ `original` à `Token` (miroir exact de
+      `Item.tok`) : rempli une fois par le tokenizer et jamais réécrit
+      ensuite ; les 4 sites de lecture `parsePlainInt`/`parsePlainFloat`
+      basculés de `.text` vers `.original` ; les ~19 sites de
+      construction de tokens synthétiques (repliement, réécritures
+      ternaire/incrément/fusion) mis à jour pour porter `original` égal
+      à leur propre `text` fraîchement calculé — le compilateur
+      TypeScript a servi de checklist exhaustive (erreur systématique
+      sur tout site oublié), aucune omission possible. Trouvé par le
+      test de parité sur la fixture ci-dessus, pas par relecture : 47/48
+      avant correction, 48/48 après.
+      Parité Rust/TS/wasm 48/48, `cargo test`/`cargo clippy` (×2)
+      propres, budget de taille (Phase 0) : **4298 → 4407 octets**
+      (nouvelle fixture, pas une régression sur l'existant). Suite web
+      complète vérifiée — verte.
 
 ---
 
