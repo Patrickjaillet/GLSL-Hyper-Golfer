@@ -16,6 +16,18 @@ jobs:
       - name: cargo clippy (deny warnings)
         working-directory: rust-core
         run: cargo clippy --all-targets -- -D warnings
+      # Separate step, not folded into the one above: the wasm-bindgen
+      # exports in lib.rs are behind `#[cfg(feature = "wasm")]`, so a
+      # plain `cargo clippy --all-targets` never even compiles that
+      # module -- it was only ever checked by whoever happened to run
+      # `--features wasm` locally before committing. The e2e/parity
+      # jobs don't cover this gap either: they use the wasm-pkg/*
+      # files already committed to the repo rather than rebuilding wasm
+      # from source, so a real compile error in the wasm-gated code
+      # could reach main undetected without this.
+      - name: cargo clippy --features wasm (deny warnings)
+        working-directory: rust-core
+        run: cargo clippy --all-targets --features wasm -- -D warnings
       - name: cargo test (unit + property/fuzz tests)
         working-directory: rust-core
         run: cargo test --all-targets

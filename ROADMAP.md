@@ -716,6 +716,20 @@ Shadertoy a besoin de :
         `wasm32-unknown-unknown` + `wasm-pack` dans le job, un coût de
         temps de CI non négligeable pour un troisième niveau de parité
         déjà couvert indirectement par `cargo test` (même code source)
+  - ✅ **FAIT (14/07/2026) — `cargo clippy --features wasm` en CI, trou
+        de couverture réel trouvé.** Le module `wasm_api` de `lib.rs`
+        est derrière `#[cfg(feature = "wasm")]`, donc le `cargo clippy
+        --all-targets` déjà en CI ne le compilait jamais — et ni le job
+        `e2e` ni `parity` ne compilent le wasm depuis les sources non
+        plus, ils utilisent les fichiers `wasm-pkg/*` déjà commités
+        (régénérés manuellement via `wasm-pack build` avant chaque
+        commit qui touche cette partie). Concrètement, ce module n'était
+        vérifié que par qui pensait à lancer `--features wasm` en local
+        avant de commiter — repéré en ajoutant l'API de whitelist de
+        noms protégés cette session (qui a supprimé `golf_json_ex` et
+        ajouté `golf_json_protected`), vérifiée manuellement ce
+        jour-là mais sans filet en CI. Nouvelle étape séparée dans le
+        job `rust-tests`, revérifiée verte en local avant de commiter.
 - [ ] Coverage rapport publié (codecov ou équivalent)
 - ✅ **FAIT (14/07/2026) — Benchmarks de perf du moteur (`criterion`).**
       Nouveau `rust-core/benches/golf_bench.rs`, `cargo bench` (dev-dep
