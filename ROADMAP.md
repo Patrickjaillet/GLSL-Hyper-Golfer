@@ -567,10 +567,56 @@ Shadertoy a besoin de :
       conclure que la fonctionnalité marchait). Suite complète (tsc,
       eslint, build, e2e) inchangée.
 - [ ] Support **audio input** (`iChannel` en mode microphone/FFT comme
-      Shadertoy)
-- [ ] Support **vidéo** et **webcam** comme source de canal
-- [ ] Support clavier (`iKeyboard` via texture spéciale, comme sur
-      Shadertoy)
+      Shadertoy) — nécessite `getUserMedia` + `AnalyserNode` + upload de
+      texture par frame ; contrairement aux cubemaps/volumes, **pas**
+      bloqué par un manque d'assets (entrée live), mais une unité de
+      travail séparée et plus grosse que le clavier, avec un vrai flux
+      de permission navigateur à gérer — non fait cette session
+- [ ] Support **vidéo** et **webcam** comme source de canal — même
+      remarque : webcam et upload de fichier vidéo utilisateur sont
+      tous deux faisables sans fabriquer de contenu (flux live /
+      fichier fourni par l'utilisateur), mais demandent leur propre
+      gestion de permission et pipeline de texture vidéo — non fait
+      cette session
+- ✅ **FAIT (14/07/2026) — Support clavier (`iKeyboard`).** Contrairement
+      aux cubemaps/volumes (section précédente), **support réel, pas un
+      substitut synthétique** : le canal clavier de Shadertoy lui-même
+      ne référence aucun asset externe, juste des évènements
+      `keydown`/`keyup` en direct — exactement ce que cette app peut
+      capturer nativement, donc rien à fabriquer.
+  - **Layout de texture identique à Shadertoy** : 256 colonnes (une
+    par `keyCode` JS) × 3 lignes — ligne 0 "down" (1 tant que la
+    touche est maintenue), ligne 1 "pressed" (1 pendant exactement la
+    frame suivant un vrai appui, pas à chaque répétition OS), ligne 2
+    "toggled" (bascule à chaque vrai appui, persiste). Lu via
+    `texelFetch`, donc `sampler2D` ordinaire — pas de type de sampler
+    spécial requis, contrairement à cubemap/volume.
+  - `event.repeat` explicitement filtré pour "pressed"/"toggled" (mais
+    pas pour "down", qui doit rester vrai pendant toute répétition) —
+    sans ça, maintenir une touche enfoncée aurait fait clignoter
+    "toggled" en continu au lieu de basculer une seule fois par appui
+    réel.
+  - Texture ré-uploadée une fois par frame (pas par passe) juste avant
+    la boucle de rendu des passes, puis le tableau "pressed" est vidé
+    juste après l'upload — garantit que "pressed" ne reste vrai que
+    pour exactement une frame, peu importe combien de passes lisent
+    ce canal.
+  - **Import/export Shadertoy réels, pas juste ignorés comme
+    cubemap/volume** : un vrai canal `type:"keyboard"` d'un shader
+    Shadertoy importé se câble maintenant correctement sur le support
+    clavier de cette app (import fidèle, pas un remplacement par un
+    substitut) ; l'export réémet de même un vrai
+    `{id:"keyboard",type:"keyboard"}` plutôt que de l'omettre.
+      6 tests headless dédiés (script jetable, supprimé après usage) :
+      compile, état initial à zéro, `down`/`toggled` corrects pendant
+      qu'une vraie touche est maintenue (via `page.keyboard.down`),
+      pulse "pressed" bien retombé à zéro entre-temps (capturer la
+      frame exacte du pulse via des appels Playwright asynchrones
+      contre une boucle `requestAnimationFrame` réelle n'est pas
+      fiable — vérifié la propriété qui compte : qu'il s'est bien
+      déclenché puis effacé, pas l'instant exact), état après
+      relâchement (`down` retombe, `toggled` persiste). Suite complète
+      (tsc, eslint, build, e2e) inchangée.
 
 ---
 

@@ -95,7 +95,7 @@ interface SavedProject {
 function isValidChannelWiring(x: unknown): x is ChannelWiring {
   if (!x || typeof x !== "object") return false;
   const c = x as Record<string, unknown>;
-  if (c.kind === "none" || c.kind === "cubemap" || c.kind === "volume") return true;
+  if (c.kind === "none" || c.kind === "cubemap" || c.kind === "volume" || c.kind === "keyboard") return true;
   return c.kind === "buffer" && typeof c.id === "string" && (BUFFER_SLOTS as string[]).includes(c.id);
 }
 
@@ -611,6 +611,7 @@ function renderChannelRow(): void {
         .concat([
           `<option value="cubemap"${ch.kind === "cubemap" ? " selected" : ""}>${t("channel.cubemap")}</option>`,
           `<option value="volume"${ch.kind === "volume" ? " selected" : ""}>${t("channel.volume")}</option>`,
+          `<option value="keyboard"${ch.kind === "keyboard" ? " selected" : ""}>${t("channel.keyboard")}</option>`,
         ])
         .join("");
       return `<label>iChannel${i} <select data-channel-index="${i}">${opts}</select></label>`;
@@ -620,7 +621,7 @@ function renderChannelRow(): void {
     sel.addEventListener("change", () => {
       const idx = Number(sel.dataset.channelIndex);
       const wiring: ChannelWiring =
-        sel.value === "none" || sel.value === "cubemap" || sel.value === "volume"
+        sel.value === "none" || sel.value === "cubemap" || sel.value === "volume" || sel.value === "keyboard"
           ? { kind: sel.value }
           : { kind: "buffer", id: sel.value as BufferSlot };
       (getPassState(currentTab) as PassState).channels[idx] = wiring;
@@ -1306,6 +1307,12 @@ function applyShadertoyShader(shader: ShadertoyShader): void {
     for (const inp of inputs) {
       if (inp.type === "buffer" && outputIdToSlot.has(inp.id)) {
         channels[inp.channel] = { kind: "buffer", id: outputIdToSlot.get(inp.id)! };
+      } else if (inp.type === "keyboard") {
+        // Unlike texture/cubemap/video/audio, this needs no asset at
+        // all -- both Shadertoy's and this app's keyboard channel are
+        // just live keydown/keyup events, so this is a real, correct
+        // import, not a placeholder substitution.
+        channels[inp.channel] = { kind: "keyboard" };
       } else {
         unsupported.push(t("shadertoy.unsupportedChannel", { pass: passName, ch: String(inp.channel), type: inp.type }));
       }
@@ -1345,6 +1352,18 @@ function exportToShadertoy(): void {
   if (common.trim()) {
     passes.push({ code: common, name: "Common", type: "common", inputs: [], outputs: [] });
   }
+  // "keyboard" exports as real Shadertoy input, same reasoning as the
+  // import side: it needs no asset, so this is a faithful round-trip,
+  // not a placeholder. "cubemap"/"volume" are local-only synthetic
+  // test textures with nothing real to reference on Shadertoy's side,
+  // so (like "none") they're simply omitted -- silently, same as
+  // they've always been.
+  function channelToInput(ch: ChannelWiring, i: number): ShadertoyInput | null {
+    if (ch.kind === "buffer") return { id: `367${activeSlots().indexOf(ch.id)}`, channel: i, type: "buffer" };
+    if (ch.kind === "keyboard") return { id: "keyboard", channel: i, type: "keyboard" };
+    return null;
+  }
+
   let bufIdx = 0;
   for (const slot of activeSlots()) {
     const state = bufferStates[slot]!;
@@ -1353,11 +1372,7 @@ function exportToShadertoy(): void {
       name: BUFFER_LABELS[slot],
       type: "buffer",
       outputs: [{ id: `367${bufIdx}`, channel: 0 }],
-      inputs: state.channels
-        .map((ch, i) =>
-          ch.kind === "buffer" ? { id: `367${activeSlots().indexOf(ch.id)}`, channel: i, type: "buffer" } : null,
-        )
-        .filter((x): x is ShadertoyInput => x !== null),
+      inputs: state.channels.map(channelToInput).filter((x): x is ShadertoyInput => x !== null),
     });
     bufIdx++;
   }
@@ -1366,9 +1381,7 @@ function exportToShadertoy(): void {
     name: "Image",
     type: "image",
     outputs: [{ id: "image", channel: 0 }],
-    inputs: imageState.channels
-      .map((ch, i) => (ch.kind === "buffer" ? { id: `367${activeSlots().indexOf(ch.id)}`, channel: i, type: "buffer" } : null))
-      .filter((x): x is ShadertoyInput => x !== null),
+    inputs: imageState.channels.map(channelToInput).filter((x): x is ShadertoyInput => x !== null),
   });
 
   const json = JSON.stringify({ Shader: { info: { name: "Exported from GLSL Hyper-Golfer" }, renderpass: passes } }, null, 2);

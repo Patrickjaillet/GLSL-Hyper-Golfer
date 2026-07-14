@@ -321,7 +321,19 @@ export type ChannelWiring =
   | { kind: "none" }
   | { kind: "buffer"; id: BufferSlot }
   | { kind: "cubemap" }
-  | { kind: "volume" };
+  | { kind: "volume" }
+  /**
+   * Unlike cubemap/volume, this is **real** iKeyboard support, not a
+   * placeholder — Shadertoy's own keyboard channel needs no external
+   * asset either, just live `keydown`/`keyup` events, which this app
+   * can capture directly. Matches Shadertoy's own texture layout: 256
+   * columns (one per JS `keyCode`) x 3 rows — row 0 "down" (1 while
+   * held), row 1 "pressed" (1 for exactly the frame after a real
+   * press, not on OS key-repeat), row 2 "toggled" (flips once per
+   * real press, persists). Read via `texelFetch`, so no special
+   * sampler type is needed — plain `sampler2D`, like a buffer channel.
+   */
+  | { kind: "keyboard" };
 
 export interface PassSource {
   id: PassId;
@@ -375,6 +387,12 @@ export class MultiPassRunner {
   private placeholderTex: WebGLTexture;
   private cubemapTex: WebGLTexture;
   private volumeTex: WebGLTexture;
+  private keyboardTex: WebGLTexture;
+  // 256 JS keyCodes x 3 rows (down / pressed-this-frame / toggled),
+  // matching Shadertoy's own iKeyboard texture layout exactly.
+  private keyDown = new Uint8Array(256);
+  private keyPressed = new Uint8Array(256);
+  private keyToggled = new Uint8Array(256);
   private width = 1;
   private height = 1;
   private rafId = 0;
@@ -410,6 +428,7 @@ export class MultiPassRunner {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]));
     this.cubemapTex = this.createCubemapTexture();
     this.volumeTex = this.createVolumeTexture();
+    this.keyboardTex = this.createTexture(256, 3);
 
     canvas.addEventListener("pointerdown", (e) => {
       const r = canvas.getBoundingClientRect();
@@ -424,6 +443,23 @@ export class MultiPassRunner {
       const r = canvas.getBoundingClientRect();
       this.mouse.x = ((e.clientX - r.left) / r.width) * canvas.width;
       this.mouse.y = (1 - (e.clientY - r.top) / r.height) * canvas.height;
+    });
+
+    // `keyCode` is deprecated in favor of `key`/`code`, but it's what
+    // Shadertoy's own iKeyboard convention is keyed on (a single
+    // numeric column index into a fixed-width texture) -- matching it
+    // exactly matters more here than avoiding a deprecated API.
+    window.addEventListener("keydown", (e) => {
+      if (e.keyCode >= 256) return;
+      this.keyDown[e.keyCode] = 1;
+      if (!e.repeat) {
+        this.keyPressed[e.keyCode] = 1;
+        this.keyToggled[e.keyCode] = this.keyToggled[e.keyCode] ? 0 : 1;
+      }
+    });
+    window.addEventListener("keyup", (e) => {
+      if (e.keyCode >= 256) return;
+      this.keyDown[e.keyCode] = 0;
     });
   }
 
@@ -698,8 +734,34 @@ export class MultiPassRunner {
     const gl = this.gl;
     if (wiring.kind === "cubemap") return { texture: this.cubemapTex, target: gl.TEXTURE_CUBE_MAP };
     if (wiring.kind === "volume") return { texture: this.volumeTex, target: gl.TEXTURE_3D };
+    if (wiring.kind === "keyboard") return { texture: this.keyboardTex, target: gl.TEXTURE_2D };
     if (wiring.kind === "buffer") return { texture: this.buffers.get(wiring.id)?.front ?? this.placeholderTex, target: gl.TEXTURE_2D };
     return { texture: this.placeholderTex, target: gl.TEXTURE_2D };
+  }
+
+  /**
+   * Re-uploads the 256x3 keyboard texture from the live key-state
+   * arrays, then clears the "pressed" pulse -- called once per tick,
+   * *before* any pass draws, so "pressed" reads as true for exactly
+   * the one frame after a real keydown, matching Shadertoy.
+   */
+  private uploadKeyboardTexture(): void {
+    const gl = this.gl;
+    const pixels = new Uint8Array(256 * 3 * 4);
+    for (let col = 0; col < 256; col++) {
+      const rows = [this.keyDown[col], this.keyPressed[col], this.keyToggled[col]];
+      for (let row = 0; row < 3; row++) {
+        const v = rows[row] ? 255 : 0;
+        const i = (row * 256 + col) * 4;
+        pixels[i] = v;
+        pixels[i + 1] = v;
+        pixels[i + 2] = v;
+        pixels[i + 3] = 255;
+      }
+    }
+    gl.bindTexture(gl.TEXTURE_2D, this.keyboardTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 256, 3, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    this.keyPressed.fill(0);
   }
 
   private setPassUniforms(pass: CompiledPass, elapsed: number, dt: number, iDate: [number, number, number, number]): void {
@@ -732,12 +794,20 @@ export class MultiPassRunner {
       const kind = pass.channels[ch].kind;
       // Every buffer in this app renders at the same resolution as the
       // canvas (see `createTarget`), so a channel wired to one reports
-      // that. The synthetic cubemap/volume textures report their own
-      // fixed dimensions. An unwired ("none") channel reports
-      // all-zero, matching Shadertoy's own behaviour for an unbound
-      // sampler.
+      // that. The synthetic cubemap/volume textures and the real
+      // keyboard texture report their own fixed dimensions. An unwired
+      // ("none") channel reports all-zero, matching Shadertoy's own
+      // behaviour for an unbound sampler.
       const [w, h, d] =
-        kind === "buffer" ? [this.width, this.height, 1] : kind === "cubemap" ? [4, 4, 1] : kind === "volume" ? [16, 16, 16] : [0, 0, 0];
+        kind === "buffer"
+          ? [this.width, this.height, 1]
+          : kind === "cubemap"
+            ? [4, 4, 1]
+            : kind === "volume"
+              ? [16, 16, 16]
+              : kind === "keyboard"
+                ? [256, 3, 1]
+                : [0, 0, 0];
       channelRes[ch * 3] = w;
       channelRes[ch * 3 + 1] = h;
       channelRes[ch * 3 + 2] = d;
@@ -761,6 +831,7 @@ export class MultiPassRunner {
 
       const elapsed = (now - this.startTime) / 1000;
       const iDate = currentIDate();
+      this.uploadKeyboardTexture();
       gl.viewport(0, 0, this.width, this.height);
 
       for (const pass of this.passes) {
