@@ -95,7 +95,7 @@ interface SavedProject {
 function isValidChannelWiring(x: unknown): x is ChannelWiring {
   if (!x || typeof x !== "object") return false;
   const c = x as Record<string, unknown>;
-  if (c.kind === "none") return true;
+  if (c.kind === "none" || c.kind === "cubemap" || c.kind === "volume") return true;
   return c.kind === "buffer" && typeof c.id === "string" && (BUFFER_SLOTS as string[]).includes(c.id);
 }
 
@@ -608,6 +608,10 @@ function renderChannelRow(): void {
               `<option value="${slot}"${ch.kind === "buffer" && ch.id === slot ? " selected" : ""}>${BUFFER_LABELS[slot]}</option>`,
           ),
         )
+        .concat([
+          `<option value="cubemap"${ch.kind === "cubemap" ? " selected" : ""}>${t("channel.cubemap")}</option>`,
+          `<option value="volume"${ch.kind === "volume" ? " selected" : ""}>${t("channel.volume")}</option>`,
+        ])
         .join("");
       return `<label>iChannel${i} <select data-channel-index="${i}">${opts}</select></label>`;
     })
@@ -615,8 +619,21 @@ function renderChannelRow(): void {
   channelRowEl.querySelectorAll<HTMLSelectElement>("select[data-channel-index]").forEach((sel) => {
     sel.addEventListener("change", () => {
       const idx = Number(sel.dataset.channelIndex);
-      const wiring: ChannelWiring = sel.value === "none" ? { kind: "none" } : { kind: "buffer", id: sel.value as BufferSlot };
+      const wiring: ChannelWiring =
+        sel.value === "none" || sel.value === "cubemap" || sel.value === "volume"
+          ? { kind: sel.value }
+          : { kind: "buffer", id: sel.value as BufferSlot };
       (getPassState(currentTab) as PassState).channels[idx] = wiring;
+      // Switching to/from "buffer"/"none" only ever changed which
+      // texture gets *bound* at draw time (always sampler2D either
+      // way), harmless to leave for the next manual Run. But
+      // "cubemap"/"volume" change the GLSL sampler *type* the shader
+      // itself declares (samplerCube/sampler3D) -- the already-
+      // compiled program would go stale immediately, sampling with
+      // the wrong type until the user happened to run again. Always
+      // re-golfing on any channel change avoids that staleness window
+      // rather than only fixing it for the two kinds that need it.
+      golfProject();
       scheduleAutosave();
     });
   });

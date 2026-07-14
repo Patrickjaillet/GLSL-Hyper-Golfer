@@ -471,7 +471,61 @@ Shadertoy a besoin de :
     Image si WebGL2 est indisponible — tout buffer configuré est alors
     ignoré avec un avertissement explicite dans le bandeau d'erreur,
     plutôt que silencieusement.
-- [ ] Support **cubemaps** et **volume textures** en entrée
+- 🟡 **PARTIEL (14/07/2026) — Support cubemaps et volume textures en
+      entrée, avec des textures de test synthétiques plutôt que du
+      contenu réel.** Décision explicite, pas un compromis caché :
+      aucune vraie texture cubemap/volume Shadertoy (assets binaires)
+      n'était fabricable dans cette session, et un pipeline d'upload
+      n'existe pas encore (item séparé juste en dessous). Construit
+      quand même la partie *architecture*, en câblant deux textures
+      procédurales sur du contenu de test :
+  - **Cubemap** : une couleur unie distincte par face (+X rouge, -X
+    cyan, +Y vert, -Y magenta, +Z bleu, -Z jaune — motif "cubemap de
+    debug" classique), 4x4 par face.
+  - **Volume** : bruit déterministe bon marché (pas du vrai
+    Perlin/simplex, inutile ici), 16x16x16, un seul canal (rouge) —
+    une texture de volume stock réelle comme "Gray Noise 3D" de
+    Shadertoy est elle-même quasi monochrome, donc raisonnable comme
+    substitut.
+  - **Vrai changement d'architecture, pas juste deux textures de
+    plus** : l'en-tête de shader déclarait jusqu'ici `sampler2D`
+    pour les 4 iChannel sans condition. Maintenant généré par canal
+    selon son câblage (`samplerCube` pour un canal cubemap,
+    `sampler3D` pour un volume, `sampler2D` sinon), avec
+    `precision highp sampler3D;` ajouté systématiquement (requis par
+    GLSL ES 3.00 dès qu'un sampler3D existe quelque part). La liaison
+    de texture suit désormais aussi une cible WebGL différente selon
+    le type (`TEXTURE_CUBE_MAP`/`TEXTURE_3D` vs `TEXTURE_2D`).
+  - **Bug réel trouvé et corrigé en écrivant la vérification, pas
+    après coup** : changer le câblage d'un canal depuis le menu
+    déroulant de l'UI ne redéclenchait jamais de recompilation —
+    avant cet ajout c'était inoffensif (`sampler2D` restait
+    `sampler2D` quel que soit le câblage, seule la texture *liée*
+    changeait), mais bascule vers/depuis cubemap ou volume change
+    maintenant le *type* GLSL déclaré lui-même : le programme déjà
+    compilé restait silencieusement obsolète (mauvais type de
+    sampler) jusqu'au prochain clic manuel sur "Exécuter". Corrigé en
+    appelant `golfProject()` sur tout changement de câblage plutôt que
+    seulement pour cubemap/volume — plus simple et cohérent avec le
+    reste de l'UI (niveau de golf, noms protégés) qui recompile déjà
+    systématiquement au changement.
+  - `iChannelResolution` mise à jour en conséquence : (4,4,1) pour un
+    canal cubemap, (16,16,16) pour un volume, cohérent avec les
+    dimensions réelles des textures synthétiques.
+  - Import/export Shadertoy : **aucun changement nécessaire**, déjà
+    correct par construction — l'export n'a jamais géré que
+    `kind==="buffer"` (tout le reste, y compris ces deux nouveaux
+    types, est déjà silencieusement omis, comme "aucune" l'était
+    déjà) ; l'import continue de signaler un vrai canal cubemap/texture
+    Shadertoy comme "non supporté" plutôt que de le substituer
+    silencieusement par la texture de test synthétique — substituer
+    aurait été trompeur pour un import réel.
+      Vérifié en headless (script jetable, supprimé après usage, 6/6) :
+      un shader échantillonnant `iChannel0` en cubemap ou en volume
+      compile sans bandeau d'erreur, le viewport continue de rendre,
+      et sélectionner "cubemap" depuis le vrai menu déroulant de l'UI
+      (pas seulement via un état pré-câblé) recompile correctement.
+      Suite complète (tsc, eslint, build, e2e) inchangée.
 - [ ] Support des **textures statiques** (upload d'image / textures
       stock Shadertoy) comme source de canal
 - ✅ **FAIT (14/07/2026) — Uniforms manquants ajoutés** dans les deux

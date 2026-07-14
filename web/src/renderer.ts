@@ -307,7 +307,21 @@ export class ShaderRunner {
 export type BufferSlot = "bufferA" | "bufferB" | "bufferC" | "bufferD";
 export type PassId = BufferSlot | "image";
 
-export type ChannelWiring = { kind: "none" } | { kind: "buffer"; id: BufferSlot };
+/**
+ * "cubemap"/"volume" are **synthetic placeholders**, not real texture
+ * input: no image-upload pipeline exists yet (see ROADMAP.md), and a
+ * real Shadertoy stock cubemap/volume texture is a binary media asset
+ * this can't fabricate. Wiring a channel to either one binds a small
+ * procedurally-generated debug texture (see `MultiPassRunner`'s
+ * `createCubemapTexture`/`createVolumeTexture`) so a shader written
+ * against `samplerCube`/`sampler3D` at least compiles and samples
+ * *something* structured, rather than being entirely unsupported.
+ */
+export type ChannelWiring =
+  | { kind: "none" }
+  | { kind: "buffer"; id: BufferSlot }
+  | { kind: "cubemap" }
+  | { kind: "volume" };
 
 export interface PassSource {
   id: PassId;
@@ -359,6 +373,8 @@ export class MultiPassRunner {
   private passes: CompiledPass[] = [];
   private buffers = new Map<BufferSlot, BufferTarget>();
   private placeholderTex: WebGLTexture;
+  private cubemapTex: WebGLTexture;
+  private volumeTex: WebGLTexture;
   private width = 1;
   private height = 1;
   private rafId = 0;
@@ -392,6 +408,8 @@ export class MultiPassRunner {
     this.placeholderTex = this.createTexture(1, 1);
     gl.bindTexture(gl.TEXTURE_2D, this.placeholderTex);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]));
+    this.cubemapTex = this.createCubemapTexture();
+    this.volumeTex = this.createVolumeTexture();
 
     canvas.addEventListener("pointerdown", (e) => {
       const r = canvas.getBoundingClientRect();
@@ -418,6 +436,75 @@ export class MultiPassRunner {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return tex;
+  }
+
+  /**
+   * Debug cubemap: a distinct solid color per face (classic +X red /
+   * -X cyan / +Y green / -Y magenta / +Z blue / -Z yellow pattern) —
+   * see the `ChannelWiring` doc comment for why this stands in for a
+   * real stock cubemap. Tiny (4x4 per face) since every pixel within a
+   * face is identical anyway.
+   */
+  private createCubemapTexture(): WebGLTexture {
+    const gl = this.gl;
+    const tex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_CUBE_MAP, tex);
+    const size = 4;
+    const faces: [number, [number, number, number]][] = [
+      [gl.TEXTURE_CUBE_MAP_POSITIVE_X, [255, 0, 0]],
+      [gl.TEXTURE_CUBE_MAP_NEGATIVE_X, [0, 255, 255]],
+      [gl.TEXTURE_CUBE_MAP_POSITIVE_Y, [0, 255, 0]],
+      [gl.TEXTURE_CUBE_MAP_NEGATIVE_Y, [255, 0, 255]],
+      [gl.TEXTURE_CUBE_MAP_POSITIVE_Z, [0, 0, 255]],
+      [gl.TEXTURE_CUBE_MAP_NEGATIVE_Z, [255, 255, 0]],
+    ];
+    for (const [target, [r, g, b]] of faces) {
+      const pixels = new Uint8Array(size * size * 4);
+      for (let p = 0; p < size * size; p++) {
+        pixels[p * 4] = r;
+        pixels[p * 4 + 1] = g;
+        pixels[p * 4 + 2] = b;
+        pixels[p * 4 + 3] = 255;
+      }
+      gl.texImage2D(target, 0, gl.RGBA, size, size, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    }
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return tex;
+  }
+
+  /**
+   * Debug volume texture: cheap deterministic hash noise (not real
+   * Perlin/simplex — no need for it here), single-channel (red only;
+   * a real stock volume texture like Shadertoy's "Gray Noise 3D" is
+   * typically also near-grayscale). See `ChannelWiring`'s doc comment
+   * for why this stands in for real content. WebGL2-only (`TEXTURE_3D`
+   * has no WebGL1 equivalent) — fine here since `MultiPassRunner`
+   * itself already requires WebGL2.
+   */
+  private createVolumeTexture(): WebGLTexture {
+    const gl = this.gl;
+    const tex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_3D, tex);
+    const size = 16;
+    const data = new Uint8Array(size * size * size);
+    for (let z = 0; z < size; z++) {
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          const h = Math.sin(x * 12.9898 + y * 78.233 + z * 37.719) * 43758.5453;
+          data[z * size * size + y * size + x] = Math.floor((h - Math.floor(h)) * 255);
+        }
+      }
+    }
+    gl.texImage3D(gl.TEXTURE_3D, 0, gl.R8, size, size, size, 0, gl.RED, gl.UNSIGNED_BYTE, data);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.REPEAT);
     return tex;
   }
 
@@ -462,8 +549,16 @@ export class MultiPassRunner {
     return shader;
   }
 
-  private buildFsSource(fragmentBody: string): { source: string; bodyStartLine: number } {
-    const header = `#version 300 es\nprecision highp float;\nuniform vec3 iResolution;\nuniform float iTime;\nuniform float iTimeDelta;\nuniform int iFrame;\nuniform vec4 iMouse;\nuniform sampler2D iChannel0;\nuniform sampler2D iChannel1;\nuniform sampler2D iChannel2;\nuniform sampler2D iChannel3;\nuniform float iChannelTime[4];\nuniform vec3 iChannelResolution[4];\nuniform vec4 iDate;\nuniform float iSampleRate;\nuniform float iFrameRate;\nout vec4 outColor;\n`;
+  /** Cube/volume channels need `samplerCube`/`sampler3D` instead of the default `sampler2D` — see `ChannelWiring`. */
+  private static samplerTypeFor(wiring: ChannelWiring): string {
+    if (wiring.kind === "cubemap") return "samplerCube";
+    if (wiring.kind === "volume") return "sampler3D";
+    return "sampler2D";
+  }
+
+  private buildFsSource(fragmentBody: string, channels: ChannelWiring[]): { source: string; bodyStartLine: number } {
+    const channelDecls = channels.map((ch, i) => `uniform ${MultiPassRunner.samplerTypeFor(ch)} iChannel${i};`).join("\n");
+    const header = `#version 300 es\nprecision highp float;\nprecision highp sampler3D;\nuniform vec3 iResolution;\nuniform float iTime;\nuniform float iTimeDelta;\nuniform int iFrame;\nuniform vec4 iMouse;\n${channelDecls}\nuniform float iChannelTime[4];\nuniform vec3 iChannelResolution[4];\nuniform vec4 iDate;\nuniform float iSampleRate;\nuniform float iFrameRate;\nout vec4 outColor;\n`;
     const entry = `\nvoid main(){ vec4 c; mainImage(c, gl_FragCoord.xy); outColor = c; }\n`;
     return { source: header + fragmentBody + entry, bodyStartLine: header.split("\n").length };
   }
@@ -473,7 +568,7 @@ export class MultiPassRunner {
     const vs = this.compileOne(MULTIPASS_VERTEX_SRC, gl.VERTEX_SHADER, passId, "vertex");
     let fs: WebGLShader;
     try {
-      const { source, bodyStartLine } = this.buildFsSource(fragmentBody);
+      const { source, bodyStartLine } = this.buildFsSource(fragmentBody, channels);
       fs = this.compileOne(source, gl.FRAGMENT_SHADER, passId, "fragment", bodyStartLine);
     } catch (e) {
       gl.deleteShader(vs);
@@ -592,9 +687,19 @@ export class MultiPassRunner {
     this.paused = paused;
   }
 
-  private resolveChannelTexture(wiring: ChannelWiring): WebGLTexture {
-    if (wiring.kind === "none") return this.placeholderTex;
-    return this.buffers.get(wiring.id)?.front ?? this.placeholderTex;
+  /**
+   * A cubemap/volume channel binds to a different WebGL texture
+   * *target* than the default 2D one (`TEXTURE_CUBE_MAP`/`TEXTURE_3D`
+   * rather than `TEXTURE_2D`) — the texture and its bind target always
+   * travel together, so this returns both rather than risking a
+   * caller pairing the right texture with the wrong target.
+   */
+  private resolveChannel(wiring: ChannelWiring): { texture: WebGLTexture; target: number } {
+    const gl = this.gl;
+    if (wiring.kind === "cubemap") return { texture: this.cubemapTex, target: gl.TEXTURE_CUBE_MAP };
+    if (wiring.kind === "volume") return { texture: this.volumeTex, target: gl.TEXTURE_3D };
+    if (wiring.kind === "buffer") return { texture: this.buffers.get(wiring.id)?.front ?? this.placeholderTex, target: gl.TEXTURE_2D };
+    return { texture: this.placeholderTex, target: gl.TEXTURE_2D };
   }
 
   private setPassUniforms(pass: CompiledPass, elapsed: number, dt: number, iDate: [number, number, number, number]): void {
@@ -612,8 +717,9 @@ export class MultiPassRunner {
       this.mouse.down ? this.mouse.downY : -Math.abs(this.mouse.downY),
     );
     for (let ch = 0; ch < 4; ch++) {
+      const { texture, target } = this.resolveChannel(pass.channels[ch]);
       gl.activeTexture(gl.TEXTURE0 + ch);
-      gl.bindTexture(gl.TEXTURE_2D, this.resolveChannelTexture(pass.channels[ch]));
+      gl.bindTexture(target, texture);
       gl.uniform1i(pass.uniforms.iChannel[ch], ch);
     }
     // No video/webcam/audio channel types are supported (see
@@ -623,14 +729,18 @@ export class MultiPassRunner {
     gl.uniform1fv(pass.uniforms.iChannelTime, [elapsed, elapsed, elapsed, elapsed]);
     const channelRes = new Float32Array(12);
     for (let ch = 0; ch < 4; ch++) {
+      const kind = pass.channels[ch].kind;
       // Every buffer in this app renders at the same resolution as the
-      // canvas (see `createTarget`), so any channel actually wired to
-      // one reports that; an unwired ("none") channel reports all-zero,
-      // matching Shadertoy's own behaviour for an unbound sampler.
-      const bound = pass.channels[ch].kind === "buffer";
-      channelRes[ch * 3] = bound ? this.width : 0;
-      channelRes[ch * 3 + 1] = bound ? this.height : 0;
-      channelRes[ch * 3 + 2] = bound ? 1 : 0;
+      // canvas (see `createTarget`), so a channel wired to one reports
+      // that. The synthetic cubemap/volume textures report their own
+      // fixed dimensions. An unwired ("none") channel reports
+      // all-zero, matching Shadertoy's own behaviour for an unbound
+      // sampler.
+      const [w, h, d] =
+        kind === "buffer" ? [this.width, this.height, 1] : kind === "cubemap" ? [4, 4, 1] : kind === "volume" ? [16, 16, 16] : [0, 0, 0];
+      channelRes[ch * 3] = w;
+      channelRes[ch * 3 + 1] = h;
+      channelRes[ch * 3 + 2] = d;
     }
     gl.uniform3fv(pass.uniforms.iChannelResolution, channelRes);
     gl.uniform4f(pass.uniforms.iDate, iDate[0], iDate[1], iDate[2], iDate[3]);
