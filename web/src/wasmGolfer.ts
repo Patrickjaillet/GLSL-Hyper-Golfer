@@ -45,6 +45,7 @@ export function wasmGolf(source: string, aggressive: boolean | AggressiveOptions
           aggressive.stripTrailingVoidReturn,
           aggressive.compoundAssignments,
           aggressive.incrementDecrement,
+          aggressive.ternaryFromIfElse,
           aggressive.mergeDeclarations,
           aggressive.stripRedundantBraces,
         );

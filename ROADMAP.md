@@ -76,7 +76,47 @@ classements), thèmes visuels, et optimisation mobile.
 - [ ] **Extraction de sous-expressions communes** (CSE) quand ça réduit
       la taille nette (attention : golfing veut souvent l'inverse —
       dupliquer est parfois plus court que déclarer une variable)
-- [ ] Réécriture `a?b:c` à partir de `if/else` quand plus court
+- ✅ **FAIT (14/07/2026) — Réécriture `a?b:c` à partir de `if/else`**,
+      10e passe agressive (`aggressive.rs::ternary_from_if_else`,
+      miroir TS). Reconnaît `if(COND){A=X;}else{A=Y;}` (accolades
+      optionnelles de chaque côté, indifféremment) et le remplace par
+      `A=(COND)?X:Y;` — toujours strictement plus court par
+      construction (le `if()`/`else`/la répétition de `A=` disparaissent
+      contre juste `?`/`:`), donc aucune mesure de taille n'est
+      nécessaire, seulement une vérification de correction.
+      **Pas de risque de dangling-else** : contrairement à
+      `strip_redundant_braces`, cette passe consomme un `if...else`
+      déjà complet comme une seule unité — le `else` appartient
+      forcément à *ce* `if`, jamais à un `if` englobant, donc rien à
+      protéger de ce côté-là, même en cas d'imbrication
+      (`if(a)if(b)x=1.;else x=2.;` reste correct après coup).
+      **Deux restrictions volontairement étroites** pour rester sûr
+      par construction plutôt qu'heuristique :
+  - `X`/`Y` (les valeurs affectées) sont chacun restreints à un
+    unique terme `scan_primary` — même restriction que le membre
+    droit de `compound_assignments`, pour la même raison (un terme
+    plus long risquerait de se ré-associer différemment une fois
+    déplacé à côté de `?`/`:`).
+  - `COND` n'est en revanche **jamais réinterprété** : la passe repère
+    seulement où il commence et finit (via le même traqueur de
+    parenthèses `skip_balanced` qu'ailleurs), puis le colle **entouré
+    de parenthèses fraîches** `(COND)` plutôt que tel quel. Ça évite
+    toute question de précédence — en particulier le piège où `COND`
+    contiendrait lui-même un `?:` de haut niveau : collé sans
+    parenthèses, `?:` étant associatif à droite, `a?b:c?x:y` se
+    relirait comme `a?b:(c?x:y)`, pas le `(a?b:c)?x:y` voulu. Coût :
+    2 caractères, toujours rentable face à l'alternative `if/else`.
+    Testé explicitement (`ternary_wraps_condition_containing_its_own_ternary`).
+      6 tests Rust dédiés (accolades/sans accolades, cibles différentes
+      refusées, membre droit multi-terme refusé, condition contenant
+      son propre ternaire, `==` jamais confondu avec une affectation)
+      + nouvelle fixture `fixtures/ternary_from_if_else.glsl` (couvre
+      accolades et sans-accolades) en parité Rust/TS/wasm (36/36) +
+      checkbox dédiée, vérifiée en headless. **Non fait** : ne gère pas
+      le cas où les deux branches déclarent une variable localement
+      différente qui converge (seulement l'affectation à une variable
+      déjà existante des deux côtés) — hors du scope volontairement
+      étroit de cette première version.
 - [ ] Détection et fusion de `for`/`while` équivalents plus courts
 - ✅ **FAIT (14/07/2026) — Suppression de `return;` final en fin de
       fonction `void`**, 8e passe agressive

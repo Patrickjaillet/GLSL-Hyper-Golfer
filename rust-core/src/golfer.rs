@@ -1,7 +1,7 @@
 use crate::aggressive::{
     compound_assignments, eliminate_dead_locals, eliminate_dead_stores, fold_constants,
     increment_decrement, merge_declarations, reduce_constant_vectors, strip_redundant_braces,
-    strip_trailing_void_return, AggressiveStats, Item,
+    strip_trailing_void_return, ternary_from_if_else, AggressiveStats, Item,
 };
 use crate::lexer::{tokenize_spaced, Tok};
 use crate::vocab::{
@@ -395,6 +395,7 @@ pub struct AggressiveOptions {
     pub strip_trailing_void_return: bool,
     pub compound_assignments: bool,
     pub increment_decrement: bool,
+    pub ternary_from_if_else: bool,
     pub merge_declarations: bool,
     pub strip_redundant_braces: bool,
 }
@@ -409,6 +410,7 @@ impl AggressiveOptions {
             strip_trailing_void_return: true,
             compound_assignments: true,
             increment_decrement: true,
+            ternary_from_if_else: true,
             merge_declarations: true,
             strip_redundant_braces: true,
         }
@@ -423,6 +425,7 @@ impl AggressiveOptions {
             strip_trailing_void_return: false,
             compound_assignments: false,
             increment_decrement: false,
+            ternary_from_if_else: false,
             merge_declarations: false,
             strip_redundant_braces: false,
         }
@@ -573,6 +576,9 @@ pub fn golf_with_options(source: &str, aggressive: AggressiveOptions) -> GolfRes
     }
     if aggressive.increment_decrement {
         items = increment_decrement(items, &mut aggressive_stats);
+    }
+    if aggressive.ternary_from_if_else {
+        items = ternary_from_if_else(items, &mut aggressive_stats);
     }
     if aggressive.merge_declarations {
         items = merge_declarations(items, &mut aggressive_stats);
@@ -798,6 +804,59 @@ mod tests {
         let r = golf("y=x+=1.0;", true);
         assert_eq!(r.code, "y=++x;");
         assert_eq!(r.stats.aggressive.increments_decrements, 1);
+    }
+
+    #[test]
+    fn ternary_from_braced_if_else() {
+        let r = golf("void f(){if(x>0.){a=1.;}else{a=-1.;}}", true);
+        assert_eq!(r.code, "void b(){a=(x>0.)?1.:-1.;}");
+        assert_eq!(r.stats.aggressive.ternaries_from_if_else, 1);
+    }
+
+    #[test]
+    fn ternary_from_unbraced_if_else() {
+        let r = golf("float f(float ready,float xv,float yv){float a=0.;if(ready>0.)a=xv;else a=yv;return a;}", true);
+        assert_eq!(r.stats.aggressive.ternaries_from_if_else, 1);
+        assert!(!r.code.contains("if("), "if/else should have been fully collapsed: {}", r.code);
+        assert!(r.code.contains("?") && r.code.contains(":"), "expected a ternary: {}", r.code);
+    }
+
+    #[test]
+    fn ternary_refuses_mismatched_targets() {
+        let r = golf("void f(){if(c){a=1.;}else{b=2.;}}", true);
+        assert!(r.code.contains("if("), "must not rewrite when the two branches assign different variables: {}", r.code);
+        assert_eq!(r.stats.aggressive.ternaries_from_if_else, 0);
+    }
+
+    #[test]
+    fn ternary_refuses_multi_term_rhs() {
+        // `a = p + q` is not a single scan_primary term, so folding it
+        // into the ternary's arm is declined (same restriction
+        // compound_assignments places on its right-hand side).
+        let r = golf("void f(){if(c){a=p+q;}else{a=r;}}", true);
+        assert!(r.code.contains("if("), "must not rewrite a multi-term arm: {}", r.code);
+        assert_eq!(r.stats.aggressive.ternaries_from_if_else, 0);
+    }
+
+    #[test]
+    fn ternary_wraps_condition_containing_its_own_ternary() {
+        // If COND itself contains a top-level `?:` and were spliced in
+        // unparenthesized, the new `?:` being added would silently
+        // reassociate with it (`?:` is right-associative: `a?b:c?x:y`
+        // parses as `a?b:(c?x:y)`, not the intended `(a?b:c)?x:y`).
+        // Pinning that COND is always wrapped in a fresh `(...)`.
+        let r = golf("void f(){if(c?d:e){a=1.;}else{a=2.;}}", true);
+        assert_eq!(r.code, "void b(){a=(c?d:e)?1.:2.;}");
+    }
+
+    #[test]
+    fn ternary_does_not_confuse_equality_with_assignment() {
+        // The arm bodies are themselves comparisons (`a==1.;`), not
+        // assignments to `a` -- must not be mistaken for the `a=X;`
+        // shape this pass looks for.
+        let r = golf("void f(){if(c){a==1.;}else{a==2.;}}", true);
+        assert!(r.code.contains("if("), "must not treat == as an assignment: {}", r.code);
+        assert_eq!(r.stats.aggressive.ternaries_from_if_else, 0);
     }
 
     #[test]

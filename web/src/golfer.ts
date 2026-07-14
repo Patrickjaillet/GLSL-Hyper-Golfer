@@ -530,6 +530,7 @@ export interface AggressiveStats {
   constantVectorsReduced: number;
   trailingVoidReturnsRemoved: number;
   incrementsDecrements: number;
+  ternariesFromIfElse: number;
 }
 
 function newAggressiveStats(): AggressiveStats {
@@ -543,6 +544,7 @@ function newAggressiveStats(): AggressiveStats {
     constantVectorsReduced: 0,
     trailingVoidReturnsRemoved: 0,
     incrementsDecrements: 0,
+    ternariesFromIfElse: 0,
   };
 }
 
@@ -950,6 +952,104 @@ function incrementDecrement(items: Token[], stats: AggressiveStats): Token[] {
       }
     }
 
+    out.push(items[i]);
+    i++;
+  }
+  return out;
+}
+
+interface TernaryMatch {
+  end: number;
+  identIdx: number;
+  cond: [number, number];
+  x: [number, number];
+  y: [number, number];
+}
+
+/**
+ * Mirrors `aggressive.rs::try_match_ternary` exactly: matches
+ * `if ( COND ) A = X ; else A = Y ;` (braces around either arm
+ * optional) at `i`, where `A` is the same identifier on both sides.
+ * `X`/`Y` are each restricted to a single `scanPrimary` term, same
+ * restriction `compoundAssignments` places on its right-hand side.
+ * `COND`'s span is returned but never re-scanned for structure — the
+ * caller splices it back wrapped in a fresh `(...)`, which is what
+ * makes any structure inside COND (including its own top-level `?:`)
+ * safe regardless of what it is.
+ */
+function tryMatchTernary(items: Token[], i: number): TernaryMatch | null {
+  const ifTok = items[i];
+  if (!ifTok || ifTok.kind !== "ident" || ifTok.text !== "if") return null;
+  if (!isStatementBoundary(items, i)) return null;
+  if (!isPunct(items[i + 1], "(")) return null;
+
+  const condStart = i + 2;
+  const afterParen = skipBalanced(items, i + 1, "(", ")");
+  if (afterParen === -1) return null;
+  const condEnd = afterParen - 1;
+
+  let j = afterParen;
+  const braced1 = isPunct(items[j], "{");
+  if (braced1) j++;
+  const identIdx = j;
+  const identTok = items[identIdx];
+  if (!identTok || identTok.kind !== "ident") return null;
+  const name1 = identTok.text;
+  if (!isPunct(items[identIdx + 1], "=")) return null;
+  if (isPunct(items[identIdx + 2], "=")) return null; // excludes `==`
+
+  const xStart = identIdx + 2;
+  const xEnd = scanPrimary(items, xStart);
+  if (xEnd === -1 || !isPunct(items[xEnd], ";")) return null;
+  let k = xEnd + 1;
+  if (braced1) {
+    if (!isPunct(items[k], "}")) return null;
+    k++;
+  }
+
+  const elseTok = items[k];
+  if (!elseTok || elseTok.kind !== "ident" || elseTok.text !== "else") return null;
+  k++;
+  const braced2 = isPunct(items[k], "{");
+  if (braced2) k++;
+  const identIdx2 = k;
+  const identTok2 = items[identIdx2];
+  if (!identTok2 || identTok2.kind !== "ident" || identTok2.text !== name1) return null;
+  if (!isPunct(items[identIdx2 + 1], "=")) return null;
+  if (isPunct(items[identIdx2 + 2], "=")) return null;
+
+  const yStart = identIdx2 + 2;
+  const yEnd = scanPrimary(items, yStart);
+  if (yEnd === -1 || !isPunct(items[yEnd], ";")) return null;
+  let end = yEnd + 1;
+  if (braced2) {
+    if (!isPunct(items[end], "}")) return null;
+    end++;
+  }
+
+  return { end, identIdx, cond: [condStart, condEnd], x: [xStart, xEnd], y: [yStart, yEnd] };
+}
+
+function ternaryFromIfElse(items: Token[], stats: AggressiveStats): Token[] {
+  const out: Token[] = [];
+  let i = 0;
+  while (i < items.length) {
+    const m = tryMatchTernary(items, i);
+    if (m) {
+      out.push(items[m.identIdx]);
+      out.push({ kind: "punct", text: "=", spaceBefore: false });
+      out.push({ kind: "punct", text: "(", spaceBefore: false });
+      for (let k = m.cond[0]; k < m.cond[1]; k++) out.push(items[k]);
+      out.push({ kind: "punct", text: ")", spaceBefore: false });
+      out.push({ kind: "punct", text: "?", spaceBefore: false });
+      for (let k = m.x[0]; k < m.x[1]; k++) out.push(items[k]);
+      out.push({ kind: "punct", text: ":", spaceBefore: false });
+      for (let k = m.y[0]; k < m.y[1]; k++) out.push(items[k]);
+      out.push({ kind: "punct", text: ";", spaceBefore: false });
+      stats.ternariesFromIfElse++;
+      i = m.end;
+      continue;
+    }
     out.push(items[i]);
     i++;
   }
@@ -1567,6 +1667,7 @@ export interface AggressiveOptions {
   stripTrailingVoidReturn: boolean;
   compoundAssignments: boolean;
   incrementDecrement: boolean;
+  ternaryFromIfElse: boolean;
   mergeDeclarations: boolean;
   stripRedundantBraces: boolean;
 }
@@ -1580,6 +1681,7 @@ export function allAggressiveOptions(on: boolean): AggressiveOptions {
     stripTrailingVoidReturn: on,
     compoundAssignments: on,
     incrementDecrement: on,
+    ternaryFromIfElse: on,
     mergeDeclarations: on,
     stripRedundantBraces: on,
   };
@@ -1692,6 +1794,7 @@ export function golf(source: string, aggressive: boolean | AggressiveOptions = f
   if (options.reduceConstantVectors) items = reduceConstantVectors(items, aggressiveStats);
   if (options.compoundAssignments) items = compoundAssignments(items, aggressiveStats);
   if (options.incrementDecrement) items = incrementDecrement(items, aggressiveStats);
+  if (options.ternaryFromIfElse) items = ternaryFromIfElse(items, aggressiveStats);
   if (options.mergeDeclarations) items = mergeDeclarations(items, aggressiveStats);
   if (options.stripRedundantBraces) items = stripRedundantBraces(items, aggressiveStats);
   if (options.stripTrailingVoidReturn) items = stripTrailingVoidReturn(items, aggressiveStats);

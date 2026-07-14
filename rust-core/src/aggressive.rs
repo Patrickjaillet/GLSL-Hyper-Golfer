@@ -30,6 +30,7 @@ pub struct AggressiveStats {
     pub constant_vectors_reduced: usize,
     pub trailing_void_returns_removed: usize,
     pub increments_decrements: usize,
+    pub ternaries_from_if_else: usize,
 }
 
 fn is_unary_prefix(c: char) -> bool {
@@ -777,6 +778,137 @@ pub fn increment_decrement(items: Vec<Item>, stats: &mut AggressiveStats) -> Vec
             }
         }
 
+        out.push(items[i].clone());
+        i += 1;
+    }
+    out
+}
+
+struct TernaryMatch {
+    end: usize,
+    ident_idx: usize,
+    cond: (usize, usize),
+    x: (usize, usize),
+    y: (usize, usize),
+}
+
+/// Matches `if ( COND ) A = X ; else A = Y ;` (braces around either arm
+/// optional, and required to wrap a single statement if present) at
+/// `i`, where `A` is the exact same identifier on both sides. Returns
+/// the spans needed to rebuild it as `A = (COND) ? X : Y ;`.
+///
+/// `X`/`Y` are each restricted to a single `scan_primary` term — same
+/// restriction `compound_assignments` places on its right-hand side,
+/// for the same reason: anything longer risks reassociating unsafely
+/// once moved next to `?`/`:`. `COND` has no such restriction because
+/// it is never re-scanned for structure at all: `try_match_ternary`
+/// only finds where it starts and ends (via the same `skip_balanced`
+/// paren-tracker used elsewhere), and the caller splices those tokens
+/// back out **wrapped in a fresh pair of parens**. That side-steps
+/// every precedence question a bare splice would raise — e.g. if COND
+/// itself contained a top-level `?:`, splicing it unparenthesized
+/// would silently reassociate with the new `?:` being added (`?:` is
+/// right-associative, so `a?b:c?x:y` parses as `a?b:(c?x:y)`, not the
+/// intended `(a?b:c)?x:y`). Wrapping in `(COND)` costs two characters
+/// and makes the question moot regardless of what COND contains.
+fn try_match_ternary(items: &[Item], i: usize) -> Option<TernaryMatch> {
+    if !matches!(&items.get(i)?.tok, Tok::Ident(s) if s == "if") {
+        return None;
+    }
+    if !is_statement_boundary(items, i) {
+        return None;
+    }
+    if !matches!(items.get(i + 1).map(|it| &it.tok), Some(Tok::Punct('('))) {
+        return None;
+    }
+    let cond_start = i + 2;
+    let after_paren = skip_balanced(items, i + 1, '(', ')')?;
+    let cond_end = after_paren - 1;
+
+    let mut j = after_paren;
+    let braced1 = matches!(items.get(j).map(|it| &it.tok), Some(Tok::Punct('{')));
+    if braced1 {
+        j += 1;
+    }
+    let ident_idx = j;
+    let name1 = match items.get(ident_idx).map(|it| &it.tok) {
+        Some(Tok::Ident(s)) => s.clone(),
+        _ => return None,
+    };
+    if !matches!(items.get(ident_idx + 1).map(|it| &it.tok), Some(Tok::Punct('='))) {
+        return None;
+    }
+    // Excludes `==` (a comparison, not an assignment) landing here.
+    if matches!(items.get(ident_idx + 2).map(|it| &it.tok), Some(Tok::Punct('='))) {
+        return None;
+    }
+    let x_start = ident_idx + 2;
+    let x_end = scan_primary(items, x_start)?;
+    if !matches!(items.get(x_end).map(|it| &it.tok), Some(Tok::Punct(';'))) {
+        return None;
+    }
+    let mut k = x_end + 1;
+    if braced1 {
+        if !matches!(items.get(k).map(|it| &it.tok), Some(Tok::Punct('}'))) {
+            return None;
+        }
+        k += 1;
+    }
+
+    if !matches!(&items.get(k)?.tok, Tok::Ident(s) if s == "else") {
+        return None;
+    }
+    k += 1;
+    let braced2 = matches!(items.get(k).map(|it| &it.tok), Some(Tok::Punct('{')));
+    if braced2 {
+        k += 1;
+    }
+    let ident2_idx = k;
+    match items.get(ident2_idx).map(|it| &it.tok) {
+        Some(Tok::Ident(s)) if *s == name1 => {}
+        _ => return None,
+    }
+    if !matches!(items.get(ident2_idx + 1).map(|it| &it.tok), Some(Tok::Punct('='))) {
+        return None;
+    }
+    if matches!(items.get(ident2_idx + 2).map(|it| &it.tok), Some(Tok::Punct('='))) {
+        return None;
+    }
+    let y_start = ident2_idx + 2;
+    let y_end = scan_primary(items, y_start)?;
+    if !matches!(items.get(y_end).map(|it| &it.tok), Some(Tok::Punct(';'))) {
+        return None;
+    }
+    let mut end = y_end + 1;
+    if braced2 {
+        if !matches!(items.get(end).map(|it| &it.tok), Some(Tok::Punct('}'))) {
+            return None;
+        }
+        end += 1;
+    }
+
+    Some(TernaryMatch { end, ident_idx, cond: (cond_start, cond_end), x: (x_start, x_end), y: (y_start, y_end) })
+}
+
+pub fn ternary_from_if_else(items: Vec<Item>, stats: &mut AggressiveStats) -> Vec<Item> {
+    let mut out: Vec<Item> = Vec::with_capacity(items.len());
+    let mut i = 0;
+    while i < items.len() {
+        if let Some(m) = try_match_ternary(&items, i) {
+            out.push(items[m.ident_idx].clone());
+            out.push(Item { tok: Tok::Punct('='), text: "=".to_string(), space_before: false });
+            out.push(Item { tok: Tok::Punct('('), text: "(".to_string(), space_before: false });
+            out.extend_from_slice(&items[m.cond.0..m.cond.1]);
+            out.push(Item { tok: Tok::Punct(')'), text: ")".to_string(), space_before: false });
+            out.push(Item { tok: Tok::Punct('?'), text: "?".to_string(), space_before: false });
+            out.extend_from_slice(&items[m.x.0..m.x.1]);
+            out.push(Item { tok: Tok::Punct(':'), text: ":".to_string(), space_before: false });
+            out.extend_from_slice(&items[m.y.0..m.y.1]);
+            out.push(Item { tok: Tok::Punct(';'), text: ";".to_string(), space_before: false });
+            stats.ternaries_from_if_else += 1;
+            i = m.end;
+            continue;
+        }
         out.push(items[i].clone());
         i += 1;
     }

@@ -55,6 +55,7 @@ mod wasm_api {
         strip_trailing_void_return: bool,
         compound_assignments: bool,
         increment_decrement: bool,
+        ternary_from_if_else: bool,
         merge_declarations: bool,
         strip_redundant_braces: bool,
     ) -> String {
@@ -66,6 +67,7 @@ mod wasm_api {
             strip_trailing_void_return,
             compound_assignments,
             increment_decrement,
+            ternary_from_if_else,
             merge_declarations,
             strip_redundant_braces,
         };
