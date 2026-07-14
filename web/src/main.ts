@@ -75,6 +75,96 @@ let imageState: PassState = { code: DEFAULT_IMAGE_CODE, channels: emptyChannels(
 let bufferStates: Partial<Record<BufferSlot, PassState>> = {};
 let currentTab: BufferId = "image";
 
+// ---------------------------------------------------------------------
+// Autosave — a page refresh (or an accidental tab close) shouldn't lose
+// the user's in-progress project. Deliberately a *single* auto-saved
+// slot, not the "several named drafts" originally envisioned in
+// ROADMAP.md: that needs its own save/load/delete UI, a separate and
+// larger unit of work than "don't lose my work on refresh".
+// ---------------------------------------------------------------------
+const AUTOSAVE_KEY = "glslgolf-autosave";
+
+interface SavedProject {
+  common: string;
+  bufferStates: Partial<Record<BufferSlot, PassState>>;
+  imageState: PassState;
+  currentTab: BufferId;
+}
+
+function isValidChannelWiring(x: unknown): x is ChannelWiring {
+  if (!x || typeof x !== "object") return false;
+  const c = x as Record<string, unknown>;
+  if (c.kind === "none") return true;
+  return c.kind === "buffer" && typeof c.id === "string" && (BUFFER_SLOTS as string[]).includes(c.id);
+}
+
+function isValidPassState(x: unknown): x is PassState {
+  if (!x || typeof x !== "object") return false;
+  const p = x as Record<string, unknown>;
+  return typeof p.code === "string" && Array.isArray(p.channels) && p.channels.length === 4 && p.channels.every(isValidChannelWiring);
+}
+
+/**
+ * Parses and validates the autosaved project from localStorage —
+ * never trusts stored JSON blindly (a previous app version's shape, a
+ * hand-edited value, or plain corruption could all be sitting there),
+ * so any structural mismatch falls back to `null` (caller keeps the
+ * hardcoded default project) rather than crashing or loading a
+ * half-valid state.
+ */
+function loadSavedProject(): SavedProject | null {
+  try {
+    const raw = localStorage.getItem(AUTOSAVE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (typeof parsed.common !== "string") return null;
+    if (!isValidPassState(parsed.imageState)) return null;
+    if (typeof parsed.bufferStates !== "object" || parsed.bufferStates === null) return null;
+
+    const bufferStates: Partial<Record<BufferSlot, PassState>> = {};
+    for (const slot of BUFFER_SLOTS) {
+      const v = (parsed.bufferStates as Record<string, unknown>)[slot];
+      if (v === undefined) continue;
+      if (!isValidPassState(v)) return null;
+      bufferStates[slot] = v;
+    }
+
+    const tab = parsed.currentTab;
+    const tabIsValid =
+      tab === "common" || tab === "image" || (typeof tab === "string" && bufferStates[tab as BufferSlot] !== undefined);
+    const currentTab: BufferId = tabIsValid ? (tab as BufferId) : "image";
+
+    return { common: parsed.common, bufferStates, imageState: parsed.imageState, currentTab };
+  } catch {
+    return null;
+  }
+}
+
+function saveProjectToLocalStorage(): void {
+  try {
+    const data: SavedProject = { common, bufferStates, imageState, currentTab };
+    localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(data));
+  } catch {
+    // Storage full or unavailable (private browsing, quota) — autosave
+    // is a convenience, never something the app should break over.
+  }
+}
+
+let autosaveTimer: ReturnType<typeof setTimeout> | undefined;
+/** Debounced so a burst of keystrokes writes to localStorage once, not per character. */
+function scheduleAutosave(): void {
+  if (autosaveTimer !== undefined) clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(saveProjectToLocalStorage, 400);
+}
+
+const savedProject = loadSavedProject();
+if (savedProject) {
+  common = savedProject.common;
+  bufferStates = savedProject.bufferStates;
+  imageState = savedProject.imageState;
+  currentTab = savedProject.currentTab;
+}
+
 function activeSlots(): BufferSlot[] {
   return BUFFER_SLOTS.filter((id) => bufferStates[id]);
 }
@@ -445,6 +535,7 @@ const sourceEditor: EditorView = createSourceEditor(
   getPassState(currentTab).code,
   (doc) => {
     setCurrentCode(doc);
+    scheduleAutosave();
   },
   t("editor.source.ariaLabel"),
 );
@@ -480,6 +571,7 @@ function renderChannelRow(): void {
       const idx = Number(sel.dataset.channelIndex);
       const wiring: ChannelWiring = sel.value === "none" ? { kind: "none" } : { kind: "buffer", id: sel.value as BufferSlot };
       (getPassState(currentTab) as PassState).channels[idx] = wiring;
+      scheduleAutosave();
     });
   });
 }
@@ -532,6 +624,7 @@ function switchTab(id: BufferId): void {
   renderChannelRow();
   golfedTabLabel.textContent = BUFFER_LABELS[id];
   renderOutput();
+  scheduleAutosave();
 }
 
 function addBuffer(): void {

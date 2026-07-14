@@ -457,8 +457,32 @@ Shadertoy a besoin de :
       golfé (surlignage de ce qui a changé, pas juste avant/après)
 - [ ] Mode **historique/undo** dédié au golfing (annuler juste la
       dernière passe)
-- [ ] Sauvegarde automatique locale (IndexedDB) du travail en cours,
-      avec plusieurs "brouillons" nommés
+- 🟡 **PARTIEL (14/07/2026) — Sauvegarde automatique locale du travail
+      en cours.** `localStorage` plutôt qu'IndexedDB (le projet entier —
+      Common, jusqu'à 4 buffers, Image, câblage iChannel — est un objet
+      JSON de quelques Ko max, largement dans le budget `localStorage`
+      sans la complexité asynchrone d'IndexedDB). Sauvegarde
+      debounced (400ms) sur : édition de code dans l'éditeur Source,
+      changement de câblage `iChannel`, changement d'onglet actif (donc
+      aussi ajout/suppression de buffer, qui passent tous les deux par
+      `switchTab`). Restauration au chargement de la page, **avant**
+      la création de l'éditeur CodeMirror (donc le contenu initial
+      affiché est déjà le bon, pas un flash du projet par défaut suivi
+      d'un remplacement). Jamais fait confiance aveuglément au JSON
+      stocké : validation structurelle complète (`loadSavedProject`)
+      avant d'écraser le projet par défaut — un JSON corrompu, une
+      ancienne forme de version précédente, ou une valeur modifiée à la
+      main tombent tous silencieusement en repli sur le projet par
+      défaut plutôt que de planter ou charger un état à moitié valide.
+      Vérifié en headless (script jetable, supprimé après usage) : JSON
+      corrompu → repli sur le défaut sans erreur console ; projet valide
+      avec marqueur distinctif → restauré tel quel dans l'éditeur Source
+      au chargement, compile sans bandeau d'erreur ; frappe clavier →
+      écriture debounced confirmée dans `localStorage` après 900ms.
+      **Reste non fait** : "plusieurs brouillons nommés" — un seul
+      emplacement auto-sauvegardé, pas une UI de sauvegarde/chargement/
+      suppression de brouillons multiples (unité de travail séparée et
+      plus large que "ne pas perdre mon travail au rechargement").
 - ✅ **FAIT, en partie (13/07/2026) — `Ctrl/Cmd+Entrée` pour golfer**
       depuis n'importe où, y compris le focus dans l'éditeur (CodeMirror
       ne réserve pas cette combinaison, donc l'événement remonte
