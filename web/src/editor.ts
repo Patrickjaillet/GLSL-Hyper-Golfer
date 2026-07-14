@@ -28,63 +28,77 @@ import { glsl } from "./glslLanguage";
 const theme = EditorView.theme(
   {
     "&": {
-      color: "var(--paper)",
-      backgroundColor: "var(--ink)",
+      color: "var(--text-primary)",
+      backgroundColor: "var(--bg-void)",
       height: "100%",
-      fontSize: "12px",
+      fontSize: "var(--fs-3)",
     },
     ".cm-content": {
       fontFamily: "var(--font-mono)",
-      caretColor: "var(--cyan)",
+      caretColor: "var(--acid-green)",
       padding: "10px 12px",
     },
-    ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--cyan)" },
+    // Neon caret — a thin glow rather than a flat line, matching the
+    // "curseur d'édition au style néon" ask (ROADMAP.md Phase 6).
+    ".cm-cursor, .cm-dropCursor": {
+      borderLeftColor: "var(--acid-green)",
+      borderLeftWidth: "2px",
+      boxShadow: "0 0 4px var(--acid-green)",
+    },
     "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": {
-      backgroundColor: "rgba(232,163,61,0.25)",
+      backgroundColor: "rgba(57,255,136,0.18)",
     },
     ".cm-gutters": {
-      // Was #3a4a3a — measured at a 2.03:1 contrast ratio against this
-      // background by an axe-core audit (WCAG AA requires 4.5:1 for
-      // normal text). var(--paper-dim) is the same secondary-text tone
-      // used everywhere else in the app and comfortably clears it.
-      backgroundColor: "#0c0f0b",
-      color: "var(--paper-dim)",
+      // Slightly darker than the editor's own --bg-void (there's no
+      // darker token in the palette to reference) so the gutter reads
+      // as a distinct strip rather than blending into the content —
+      // ROADMAP.md Phase 6 "fond légèrement plus sombre". var(--text-dim)
+      // is the same secondary-text tone used everywhere else in the
+      // app; it clears WCAG AA (4.5:1) against this background.
+      backgroundColor: "#030405",
+      color: "var(--text-dim)",
       border: "none",
-      borderRight: "1px solid var(--ink-line)",
+      borderRight: "1px solid var(--line)",
     },
-    ".cm-activeLineGutter": { backgroundColor: "rgba(95,212,200,0.08)", color: "var(--paper-dim)" },
-    ".cm-activeLine": { backgroundColor: "rgba(95,212,200,0.04)" },
-    ".cm-matchingBracket, .cm-nonmatchingBracket": { backgroundColor: "rgba(95,212,200,0.25)", outline: "none" },
+    ".cm-activeLineGutter": { backgroundColor: "rgba(57,255,136,0.08)", color: "var(--text-dim)" },
+    // Active line reads as "selected line on an oscilloscope" — a faint
+    // fill plus a thin neon accent bar down its left edge, not just a
+    // barely-there background tint.
+    ".cm-activeLine": {
+      backgroundColor: "rgba(57,255,136,0.04)",
+      boxShadow: "inset 2px 0 0 0 var(--acid-green)",
+    },
+    ".cm-matchingBracket, .cm-nonmatchingBracket": { backgroundColor: "rgba(178,107,255,0.25)", outline: "none" },
     ".cm-tooltip": {
-      backgroundColor: "var(--ink-raised)",
-      border: "1px solid var(--ink-line)",
-      color: "var(--paper)",
+      backgroundColor: "var(--bg-raised)",
+      border: "1px solid var(--line)",
+      color: "var(--text-primary)",
       fontFamily: "var(--font-mono)",
-      fontSize: "11px",
+      fontSize: "var(--fs-2)",
     },
     ".cm-tooltip-autocomplete ul li[aria-selected]": {
-      backgroundColor: "var(--cyan-dim)",
-      color: "var(--ink)",
+      backgroundColor: "var(--signal-violet)",
+      color: "var(--bg-void)",
     },
     ".cm-scroller": { overflow: "auto", fontFamily: "var(--font-mono)" },
     "&.cm-editor.cm-focused": { outline: "none" },
-    ".cm-error-line": { backgroundColor: "rgba(232, 97, 91, 0.18)" },
+    ".cm-error-line": { backgroundColor: "rgba(255, 59, 78, 0.18)" },
   },
   { dark: true },
 );
 
 const highlightStyle = HighlightStyle.define([
-  { tag: t.keyword, color: "var(--amber)" },
-  { tag: [t.typeName, t.atom, t.bool], color: "var(--cyan)" },
+  { tag: t.keyword, color: "var(--signal-violet)" },
+  { tag: [t.typeName, t.atom, t.bool], color: "#d9b8ff" },
   { tag: [t.function(t.variableName), t.standard(t.name)], color: "#9fd6ff" },
-  { tag: t.variableName, color: "var(--paper)" },
-  { tag: t.number, color: "#f0b357" },
-  { tag: t.string, color: "#f0b357" },
-  { tag: [t.comment, t.lineComment, t.blockComment], color: "var(--paper-dim)", fontStyle: "italic" },
-  { tag: t.operator, color: "var(--paper)" },
-  { tag: [t.punctuation, t.bracket], color: "var(--paper-dim)" },
-  { tag: t.meta, color: "var(--cyan-dim)" },
-  { tag: t.definition(t.variableName), color: "var(--paper)", fontWeight: "600" },
+  { tag: t.variableName, color: "var(--text-primary)" },
+  { tag: t.number, color: "var(--amber-warn)" },
+  { tag: t.string, color: "var(--acid-green)" },
+  { tag: [t.comment, t.lineComment, t.blockComment], color: "var(--text-dim)", fontStyle: "italic" },
+  { tag: t.operator, color: "var(--text-primary)" },
+  { tag: [t.punctuation, t.bracket], color: "var(--text-dim)" },
+  { tag: t.meta, color: "var(--line-glow)" },
+  { tag: t.definition(t.variableName), color: "var(--text-primary)", fontWeight: "600" },
 ]);
 
 // ---------------------------------------------------------------------

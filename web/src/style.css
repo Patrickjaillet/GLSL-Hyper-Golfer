@@ -1,35 +1,106 @@
 /* ---------------------------------------------------------------------
-   Design tokens
-   Subject: a precision instrument for shrinking shader source — the
-   visual language borrows from oscilloscopes and lab test benches:
-   two signal "traces" (amber = source, cyan = golfed output) racing
-   against each other, ticked meters instead of plain percentages.
+   NIGHTWIRE — design tokens
+   Subject: a clandestine terminal for shrinking shader source — the
+   visual language borrows from underground networks and hacker-core
+   consoles: acid-green "online" signals, violet data traces, blood-red
+   kill switches, amber warnings, all on a near-black void. Single mono
+   typeface throughout (display and body) — everything reads as code.
 
-   Layout: a fixed-viewport "no scroll" dashboard (ROADMAP-UI.md) — the
-   page itself never scrolls (`html,body{overflow:hidden}`), only the
-   individual panels (source editor, golfed output) scroll internally.
-   Below a width/height breakpoint the 3-column layout collapses into a
-   single-panel tab view (`#tab-bar`) rather than trying to force 3
-   columns onto a screen too small to make them usable.
+   Layout (ROADMAP.md Phase 4): a "console of control" — thin top status
+   bar, a retractable icon sidebar for Source/Golfé/Viewport navigation
+   (one view on-stage at a time, replacing the old fixed 3-column
+   dashboard and its draggable resizers), a bottom command console for
+   the run/import/export/passes actions, and a right-edge slide-in
+   drawer for the aggressive-passes settings. The live viewport stays
+   mounted as a small picture-in-picture box in the corner even while
+   another view is on-stage, so the render never stops.
 --------------------------------------------------------------------- */
-:root {
-  --ink: #0a0d0b;
-  --ink-raised: #10140f;
-  --ink-line: #263026;
-  --ink-line-soft: #1a211a;
-  --paper: #d9e2d6;
-  --paper-dim: #8a988a;
-  --amber: #e8a33d;
-  --amber-dim: #8a6a35;
-  --cyan: #5fd4c8;
-  --cyan-dim: #3d7a72;
-  --danger: #e8615b;
 
-  --font-display: "Space Grotesk", "IBM Plex Sans", sans-serif;
-  --font-body: "IBM Plex Sans", sans-serif;
+/* Self-hosted fonts — served from /public/fonts rather than Google
+   Fonts' CDN, matching the "offline / underground" spirit of the theme
+   (ROADMAP.md Phase 1.2). Both are single variable/static Latin-subset
+   files (no cyrillic/greek/vietnamese — this app is only FR/EN), so one
+   @font-face each covers every weight actually used. */
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  /* Relative, not `/fonts/...` — this project builds with `base: "./"`
+     for its GitHub Pages sub-path deploy, and Vite doesn't rewrite
+     absolute-root `url()` paths inside CSS for a non-root base (unlike
+     index.html's own asset references, which it does rewrite). A
+     relative path resolves correctly in both dev (`/src/style.css` →
+     `/fonts/...`) and the production build (`dist/assets/*.css` →
+     `dist/fonts/...`, since `public/` is copied verbatim to the output
+     root in both cases). */
+  src: url("../fonts/jetbrains-mono-latin-variable.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F,
+    U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* Decorative stencil/glitch face — used ONLY inside the logo SVG's
+   <text> glyph (see `icon-mark.svg` / `.logo-wordmark`), never for any
+   HTML copy — per ROADMAP.md Phase 1.2's "facultative, logo-only" rule. */
+@font-face {
+  font-family: "Wallpoet";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/wallpoet-latin-400.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F,
+    U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+:root {
+  --bg-void: #05060a;
+  --bg-panel: #0b0e14;
+  --bg-raised: #12161f;
+  --line: #1c2230;
+  --line-glow: #2a3550;
+  --text-primary: #d7e2e8;
+  /* Was #5c6b7a — measured at 3.53:1 against --bg-panel by an audit
+     script (see ROADMAP.md Phase 7), below WCAG AA's 4.5:1 minimum for
+     normal-size text. This value clears 5.5:1+ against every surface
+     color in the theme (--bg-void/--bg-panel/--bg-raised). */
+  --text-dim: #7a8b9c;
+  --acid-green: #39ff88;
+  --blood-red: #ff3b4e;
+  --signal-violet: #b26bff;
+  --amber-warn: #ffb020;
+
+  --grid-line: rgba(28, 34, 48, 0.5);
+
+  --glow-green: 0 0 8px rgba(57, 255, 136, 0.55);
+  --glow-violet: 0 0 8px rgba(178, 107, 255, 0.55);
+  --glow-red: 0 0 8px rgba(255, 59, 78, 0.55);
+
+  --font-display: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  --font-body: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
   --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
 
-  --radius: 3px;
+  --radius: 2px;
+  --sidebar-w: 132px;
+  --sidebar-w-collapsed: 56px;
+
+  /* Fluid type scale (ROADMAP.md Phase 1.2) — each step tops out at
+     its old fixed px value at ≥900px viewports (no visual change at
+     the desktop widths this console is normally used at) and eases
+     down a notch below that, down to a 380px floor, instead of a
+     dedicated font-size media query per breakpoint. */
+  --fs-1: clamp(9px, 0.192vw + 8.27px, 10px);
+  --fs-2: clamp(10px, 0.192vw + 9.27px, 11px);
+  --fs-3: clamp(11px, 0.192vw + 10.27px, 12px);
+  --fs-4: clamp(12.5px, 0.288vw + 11.4px, 14px);
+  --fs-5: clamp(16px, 0.385vw + 14.54px, 18px);
+
+  /* "Circuit board" corner vias — a tiny pad at each corner of the main
+     console boxes, like traces meeting at a via, per ROADMAP.md Phase
+     1.3/2.3. Pure CSS (radial-gradient layers), no extra assets. */
+  --circuit-vias: radial-gradient(circle at 5px 5px, var(--line-glow) 1.4px, transparent 1.6px),
+    radial-gradient(circle at calc(100% - 5px) 5px, var(--line-glow) 1.4px, transparent 1.6px),
+    radial-gradient(circle at 5px calc(100% - 5px), var(--line-glow) 1.4px, transparent 1.6px),
+    radial-gradient(circle at calc(100% - 5px) calc(100% - 5px), var(--line-glow) 1.4px, transparent 1.6px);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -49,26 +120,65 @@ body {
   padding: 0;
   height: 100%;
   overflow: hidden;
-  background: var(--ink);
-  color: var(--paper);
+  background: var(--bg-void);
+  color: var(--text-primary);
 }
 
 body {
   font-family: var(--font-body);
-  background-image: linear-gradient(var(--ink-line-soft) 1px, transparent 1px),
-    linear-gradient(90deg, var(--ink-line-soft) 1px, transparent 1px);
+  position: relative;
+  background-image: linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
   background-size: 48px 48px;
   background-position: -1px -1px;
 }
 
-body.resizing {
-  cursor: col-resize;
-  user-select: none;
+/* Subtle procedural grain — stands in for a PNG noise texture (no image
+   pipeline in this build) — see ROADMAP.md Phase 1.3. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  pointer-events: none;
+  opacity: 0.035;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+}
+
+/* Subtle CRT scanlines with a slow flicker — Phase 3. Static-looking at
+   a glance by design (this is chrome, not the focal point); disabled
+   entirely under prefers-reduced-motion via the global rule above. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  pointer-events: none;
+  mix-blend-mode: overlay;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.035) 0px,
+    rgba(255, 255, 255, 0.035) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  animation: crt-flicker 6s ease-in-out infinite;
+}
+
+@keyframes crt-flicker {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 0.6;
+  }
 }
 
 ::selection {
-  background: var(--amber);
-  color: var(--ink);
+  background: var(--acid-green);
+  color: var(--bg-void);
 }
 
 button,
@@ -78,19 +188,141 @@ input {
 }
 
 :focus-visible {
-  outline: 2px solid var(--cyan);
+  outline: 2px solid var(--acid-green);
   outline-offset: 2px;
 }
 
 /* ---------------------------------------------------------------------
+   Custom checkbox switch — a hand-drawn "circuit interrupteur" replacing
+   the browser-native checkbox everywhere in the app (passes list,
+   pretty/compare toggles), per ROADMAP.md Phase 2.2. One shared rule
+   rather than a dozen near-identical SVG files for what's structurally
+   the same on/off affordance repeated.
+--------------------------------------------------------------------- */
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  width: 30px;
+  height: 16px;
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-void);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+input[type="checkbox"]::after {
+  content: "";
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 12px;
+  height: 12px;
+  border-radius: 1px;
+  background: var(--text-dim);
+  transition: transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+input[type="checkbox"]:hover {
+  border-color: var(--line-glow);
+}
+
+input[type="checkbox"]:checked {
+  border-color: var(--signal-violet);
+  background: rgba(178, 107, 255, 0.1);
+}
+
+input[type="checkbox"]:checked::after {
+  transform: translateX(14px);
+  background: var(--signal-violet);
+  box-shadow: var(--glow-violet);
+}
+
+/* ---------------------------------------------------------------------
    Shell — the whole app pinned to the viewport, never scrolls itself.
+   Three stacked rows: status bar, console (sidebar + stage), command
+   console.
 --------------------------------------------------------------------- */
 .shell {
+  position: relative;
+  z-index: 1;
   height: 100dvh;
   display: grid;
-  grid-template-rows: auto 1fr;
+  /* `minmax(0, 1fr)`, not a bare implicit column: without an explicit
+     column track, a CSS grid's column sizes to the *widest child's
+     natural content width* (`auto` defaults to max-content), not the
+     viewport — with `body{overflow:hidden}` globally in play (Phase 1,
+     "zero scroll" dashboard), that overflow doesn't scroll, it's just
+     unreachable. This is what broke the console/masthead on narrow
+     viewports (ROADMAP.md Phase 8). */
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto 1fr auto auto;
   gap: 10px;
   padding: 12px 14px;
+}
+
+/* Mini system-log strip (ROADMAP.md Phase 5, "esprit console") — purely
+   decorative/informative, shows only the single latest event (golf
+   run, export, import, capture, recording, error). */
+.system-log {
+  min-width: 0;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-1);
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-height: 1em;
+}
+
+.system-log::before {
+  content: "> ";
+  color: var(--line-glow);
+}
+
+.system-log:empty::after {
+  content: "▍";
+  color: var(--acid-green);
+  animation: cursor-blink 1s step-end infinite;
+}
+
+/* Stealth fullscreen ("zen mode", ROADMAP.md Phase 4/2.2 `#zen-btn`) —
+   masthead/sidebar/command console collapse away entirely, leaving the
+   viewport edge-to-edge with just its own overlay controls. */
+.shell.zen-mode {
+  grid-template-rows: 1fr;
+  gap: 0;
+  padding: 0;
+}
+
+.shell.zen-mode .masthead,
+.shell.zen-mode .console-bar,
+.shell.zen-mode .sidebar,
+.shell.zen-mode .system-log {
+  display: none;
+}
+
+.shell.zen-mode .console {
+  gap: 0;
+}
+
+.shell.zen-mode .viewport-wrap.active-tab {
+  border: none;
+  border-radius: 0;
+}
+
+/* Discreet drifting network-node background, only visible through the
+   thin gaps around the console chrome — see `startBackgroundParticles()`
+   in main.ts. Skipped entirely under prefers-reduced-motion (the canvas
+   is never created in that case). */
+#bg-particles {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
 }
 
 .masthead {
@@ -98,9 +330,25 @@ input {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  border-bottom: 1px solid var(--ink-line);
+  border-bottom: 1px solid var(--line);
   padding-bottom: 10px;
+  min-width: 0;
   min-height: 0;
+  position: relative;
+}
+
+/* Faint "connected network nodes" filigrane behind the status bar —
+   ROADMAP.md Phase 2.3. A background layer (not an inline SVG) so it
+   never intercepts clicks/keyboard focus on the real masthead controls
+   sitting in front of it. */
+.masthead::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  opacity: 0.5;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='90' height='46'><g fill='%232a3550' stroke='%232a3550' stroke-width='0.75'><line x1='8' y1='10' x2='34' y2='4'/><line x1='34' y1='4' x2='58' y2='20'/><line x1='58' y1='20' x2='82' y2='12'/><line x1='34' y1='4' x2='30' y2='34'/><line x1='58' y1='20' x2='70' y2='40'/><circle cx='8' cy='10' r='1.6'/><circle cx='34' cy='4' r='1.6'/><circle cx='58' cy='20' r='1.6'/><circle cx='82' cy='12' r='1.6'/><circle cx='30' cy='34' r='1.6'/><circle cx='70' cy='40' r='1.6'/></g></svg>");
+  background-repeat: repeat;
 }
 
 .masthead .brand {
@@ -111,68 +359,71 @@ input {
 }
 
 .brand .mark {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--ink);
-  background: var(--amber);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  color: var(--bg-void);
+  background: var(--acid-green);
+  box-shadow: var(--glow-green);
   border-radius: var(--radius);
-  padding: 3px 7px;
-  letter-spacing: 0.04em;
   flex-shrink: 0;
+}
+
+.brand .mark svg {
+  width: 16px;
+  height: 16px;
 }
 
 .masthead h1 {
   font-family: var(--font-display);
   font-weight: 600;
-  font-size: 18px;
+  font-size: var(--fs-5);
   letter-spacing: -0.01em;
   margin: 0;
-  color: #f2f5ef;
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   cursor: default;
+  animation: glitch-in 700ms steps(2, end) 1;
 }
 
-/* ---------------------------------------------------------------------
-   Tab bar — only shown under the narrow-viewport breakpoint, where the
-   3-column layout collapses to one panel at a time (see media query
-   near the bottom of this file).
---------------------------------------------------------------------- */
-.tab-bar {
-  display: none;
-  gap: 4px;
-  flex-shrink: 0;
-}
-
-.tab-btn {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: var(--paper-dim);
-  background: transparent;
-  border: 1px solid var(--ink-line);
-  border-radius: var(--radius);
-  padding: 6px 12px;
-  cursor: pointer;
-}
-
-.tab-btn:hover {
-  color: var(--paper);
-  border-color: var(--cyan-dim);
-}
-
-.tab-btn.active {
-  color: var(--ink);
-  background: var(--cyan);
-  border-color: var(--cyan);
+/* One-shot glitch on load only (never repeats/loops) — Phase 3. */
+@keyframes glitch-in {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0);
+    text-shadow: 2px 0 var(--blood-red), -2px 0 var(--signal-violet);
+  }
+  20% {
+    opacity: 1;
+    transform: translate(-2px, 1px);
+  }
+  40% {
+    transform: translate(2px, -1px);
+    text-shadow: -2px 0 var(--blood-red), 2px 0 var(--signal-violet);
+  }
+  60% {
+    transform: translate(-1px, 0);
+    text-shadow: 1px 0 var(--blood-red), -1px 0 var(--signal-violet);
+  }
+  80% {
+    transform: translate(1px, 0);
+    text-shadow: none;
+  }
+  100% {
+    opacity: 1;
+    transform: translate(0, 0);
+    text-shadow: none;
+  }
 }
 
 .engine-pill {
   font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--paper-dim);
+  font-size: var(--fs-2);
+  color: var(--text-dim);
   display: flex;
   align-items: center;
   gap: 7px;
@@ -182,75 +433,257 @@ input {
 }
 
 .engine-pill b {
-  color: var(--cyan);
+  color: var(--acid-green);
   font-weight: 500;
 }
 
+/* Pulsing "alive" indicator — only the engine-status dot, not every
+   `.dot.cyan` (the panel-title ones stay static; a 3-way repeated pulse
+   would be distracting) — ROADMAP.md Phase 5 "pastille pulsée verte". */
+.engine-pill .dot {
+  animation: engine-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes engine-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 6px var(--acid-green);
+  }
+  50% {
+    box-shadow: 0 0 11px 2px var(--acid-green);
+  }
+}
+
 .lang-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: var(--fs-2);
   font-weight: 600;
   letter-spacing: 0.04em;
-  color: var(--paper-dim);
+  color: var(--text-dim);
   background: transparent;
-  border: 1px solid var(--ink-line);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 5px 8px;
   cursor: pointer;
   flex-shrink: 0;
 }
 
+.lang-toggle svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+
 .lang-toggle:hover {
-  color: var(--cyan);
-  border-color: var(--cyan-dim);
+  color: var(--signal-violet);
+  border-color: var(--line-glow);
 }
 
 /* ---------------------------------------------------------------------
-   Layout grid — 3 columns (source | golfé | viewport) with 2 draggable
-   resizer handles between them. The first two columns are user-resized
-   pixel widths (`--w1`/`--w2`, set via JS + persisted to localStorage);
-   the last column always takes whatever space remains (`1fr`) so it can
-   never be crushed to 0 by an overzealous drag.
+   Console — sidebar + stage, side by side.
 --------------------------------------------------------------------- */
-.workspace {
-  display: grid;
-  grid-template-columns: minmax(240px, var(--w1, 1fr)) 10px minmax(240px, var(--w2, 1fr)) 10px minmax(280px, 1fr);
-  align-items: stretch;
+.console {
+  display: flex;
+  min-width: 0;
   min-height: 0;
+  gap: 10px;
 }
 
-.resizer {
-  cursor: col-resize;
+/* ---------------------------------------------------------------------
+   Sidebar — retractable icon rail (Source/Golfé/Viewport nav). Default
+   width shows icon + label; `.collapsed` shrinks to icon-only.
+--------------------------------------------------------------------- */
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: var(--sidebar-w);
+  flex-shrink: 0;
+  background-color: var(--bg-panel);
+  /* Corner vias + a faint repeating hex/circuit motif in the empty rail
+     space — ROADMAP.md Phase 1.3/2.1/2.3 "motif de fond répétable". */
+  background-image: var(--circuit-vias),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40'><path d='M20 2 36 11v18L20 38 4 29V11z' fill='none' stroke='%232a3550' stroke-width='1'/></svg>");
+  background-repeat: no-repeat, repeat;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px;
+  transition: width 0.15s ease;
+  overflow: hidden;
+}
+
+.sidebar.collapsed {
+  width: var(--sidebar-w-collapsed);
+}
+
+.tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid transparent;
+  border-left: 2px solid transparent;
+  border-radius: var(--radius);
+  padding: 9px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  width: 100%;
+  text-align: left;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.tab-btn svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
+.tab-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--line-glow);
+}
+
+.tab-btn.active {
+  color: var(--acid-green);
+  background: rgba(57, 255, 136, 0.08);
+  border-left-color: var(--acid-green);
+}
+
+/* Faint rotated brand wordmark filling the sidebar's empty vertical
+   space — the one live use of the Wallpoet decorative face (Phase
+   1.2/2.1), inlined so it can actually inherit the self-hosted
+   @font-face (a CSS background-image SVG can't see page-level fonts).
+   Hidden entirely once the sidebar is icon-only (`.collapsed`) since
+   there's no room for it there. */
+.sidebar-watermark {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  opacity: 0.07;
+  pointer-events: none;
+}
+
+.sidebar-watermark svg {
+  width: 190px;
+  height: auto;
+  transform: rotate(-90deg);
+  flex-shrink: 0;
+}
+
+.sidebar.collapsed .sidebar-watermark {
+  display: none;
+}
+
+.sidebar-collapse {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  padding: 7px;
+  cursor: pointer;
+}
+
+.sidebar-collapse svg {
+  width: 14px;
+  height: 14px;
+  transition: transform 0.15s ease;
+}
+
+.sidebar-collapse:hover {
+  color: var(--text-primary);
+  border-color: var(--line-glow);
+}
+
+.sidebar.collapsed .sidebar-collapse svg {
+  transform: rotate(180deg);
+}
+
+.sidebar.collapsed .tab-btn span,
+.sidebar.collapsed .sidebar-collapse span {
+  display: none;
+}
+
+/* ---------------------------------------------------------------------
+   Stage — one view on-stage at a time (Source / Golfé / Viewport),
+   switched via the sidebar. `.viewport-wrap` is the one exception: it
+   stays mounted and rendering even when it's not the active view, as a
+   small picture-in-picture box (see below), so the WebGL context and
+   render loop never stop.
+--------------------------------------------------------------------- */
+.stage {
   position: relative;
-}
-
-.resizer::after {
-  content: "";
-  position: absolute;
-  top: 4px;
-  bottom: 4px;
-  left: 4px;
-  width: 2px;
-  border-radius: 1px;
-  background: var(--ink-line);
-  transition: background 0.15s ease;
-}
-
-.resizer:hover::after,
-.resizer:focus-visible::after {
-  background: var(--cyan);
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
 }
 
 .panel,
 .viewport-wrap {
-  background: var(--ink-raised);
-  border: 1px solid var(--ink-line);
+  background-color: var(--bg-panel);
+  background-image: var(--circuit-vias);
+  background-repeat: no-repeat;
+  border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 10px 12px;
   min-height: 0;
-  display: flex;
+  display: none;
   flex-direction: column;
   overflow: hidden;
+}
+
+.panel.active-tab {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  animation: panel-in 180ms ease;
+}
+
+.viewport-wrap {
+  display: flex;
+}
+
+.viewport-wrap.active-tab {
+  position: absolute;
+  inset: 0;
+  animation: panel-in 180ms ease;
+}
+
+/* Fade + slight rise when a view becomes active on-stage — Phase 3. */
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.viewport-wrap:not(.active-tab) {
+  position: fixed;
+  right: 18px;
+  bottom: 86px;
+  width: 260px;
+  height: 170px;
+  z-index: 40;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
 }
 
 .panel-head {
@@ -264,11 +697,11 @@ input {
 
 .panel-title {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: var(--fs-2);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.12em;
-  color: var(--paper-dim);
+  color: var(--text-dim);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -283,12 +716,12 @@ input {
   flex-shrink: 0;
 }
 .panel-title .dot.amber {
-  background: var(--amber);
-  box-shadow: 0 0 6px var(--amber);
+  background: var(--amber-warn);
+  box-shadow: 0 0 6px var(--amber-warn);
 }
 .panel-title .dot.cyan {
-  background: var(--cyan);
-  box-shadow: 0 0 6px var(--cyan);
+  background: var(--acid-green);
+  box-shadow: 0 0 6px var(--acid-green);
 }
 
 .pretty-toggle {
@@ -298,30 +731,28 @@ input {
   align-items: center;
   gap: 7px;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--fs-2);
   letter-spacing: 0.03em;
   text-transform: none;
-  color: var(--paper-dim);
+  color: var(--text-dim);
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
 }
 
 .pretty-toggle:hover {
-  color: var(--paper);
+  color: var(--text-primary);
 }
 
-.pretty-toggle input {
-  accent-color: var(--cyan);
-  cursor: pointer;
+.pretty-toggle svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
 }
 
 /* ---------------------------------------------------------------------
    Buffer tabs (Common / Buffer A-D / Image) + per-pass iChannel wiring
-   row, above the editor in the Source panel. Distinct from `.tab-bar`
-   (the outer Source/Golfé/Viewport tabs used only in narrow-viewport
-   mode) — these are always visible, they're how a multi-buffer project
-   is authored.
+   row, above the editor in the Source view.
 --------------------------------------------------------------------- */
 .buffer-tabs {
   display: flex;
@@ -334,25 +765,26 @@ input {
 .buffer-tab-btn {
   position: relative;
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: var(--fs-2);
   letter-spacing: 0.03em;
-  color: var(--paper-dim);
+  color: var(--text-dim);
   background: transparent;
-  border: 1px solid var(--ink-line);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 5px 20px 5px 10px;
   cursor: pointer;
 }
 
 .buffer-tab-btn:hover {
-  color: var(--paper);
-  border-color: var(--cyan-dim);
+  color: var(--text-primary);
+  border-color: var(--line-glow);
 }
 
 .buffer-tab-btn.active {
-  color: var(--ink);
-  background: var(--amber);
-  border-color: var(--amber);
+  color: var(--bg-void);
+  background: var(--signal-violet);
+  border-color: var(--signal-violet);
+  box-shadow: var(--glow-violet);
 }
 
 .buffer-tab-close {
@@ -360,7 +792,7 @@ input {
   right: 5px;
   top: 50%;
   transform: translateY(-50%);
-  font-size: 9px;
+  font-size: var(--fs-1);
   opacity: 0.7;
 }
 
@@ -369,19 +801,34 @@ input {
 }
 
 .buffer-tab-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--paper-dim);
+  font-size: var(--fs-2);
+  color: var(--text-dim);
   background: transparent;
-  border: 1px dashed var(--ink-line);
+  border: 1px dashed var(--line);
   border-radius: var(--radius);
   padding: 5px 10px;
   cursor: pointer;
 }
 
+.buffer-tab-add svg {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+}
+
+.buffer-tab-close svg {
+  width: 9px;
+  height: 9px;
+  display: block;
+}
+
 .buffer-tab-add:hover {
-  color: var(--cyan);
-  border-color: var(--cyan-dim);
+  color: var(--signal-violet);
+  border-color: var(--line-glow);
 }
 
 .channel-row {
@@ -390,8 +837,8 @@ input {
   gap: 6px 14px;
   margin-bottom: 8px;
   font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--paper-dim);
+  font-size: var(--fs-2);
+  color: var(--text-dim);
   flex-shrink: 0;
 }
 
@@ -402,39 +849,58 @@ input {
 }
 
 .channel-row select {
-  background: var(--ink);
-  color: var(--paper);
-  border: 1px solid var(--ink-line);
+  background: var(--bg-void);
+  color: var(--text-primary);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: var(--fs-2);
   padding: 2px 4px;
 }
 
 /* ---------------------------------------------------------------------
    Editor (source) / Output — both are CodeMirror 6 mounts (see
-   editor.ts). Each fills the remaining height of `.panel` instead of a
-   fixed px height, so it grows/shrinks with whatever room the
-   resizable columns give it; CodeMirror's own `.cm-scroller` handles
-   internal scrolling (never the page) when the code is long. Line
-   numbers/gutter are CodeMirror's built-in ones now, not a hand-synced
-   `<div>`.
+   editor.ts). Each fills the remaining height of its view.
+   CodeMirror's own `.cm-scroller` handles internal scrolling (never the
+   page) when the code is long.
 --------------------------------------------------------------------- */
 .editor,
 .output-code {
+  position: relative;
   flex: 1;
   min-height: 0;
-  background: var(--ink);
-  border: 1px solid var(--ink-line);
+  background: var(--bg-void);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
   overflow: hidden;
 }
 
+/* Blinking terminal cursor next to placeholder text (Common buffer /
+   nothing golfed yet) — Phase 3. */
+.output-code.empty::after {
+  content: "▍";
+  position: absolute;
+  left: 13px;
+  top: 9px;
+  color: var(--acid-green);
+  font-family: var(--font-mono);
+  font-size: var(--fs-3);
+  line-height: 1;
+  pointer-events: none;
+  animation: cursor-blink 1s step-end infinite;
+}
+
+@keyframes cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
 /* Both editors share the same syntax theme now (real highlighting beats
-   a flat color), but a thin cyan edge on the golfed side keeps a trace
-   of the original amber/cyan "two signal traces" identity. */
+   a flat color), but a thin violet edge on the golfed side keeps a
+   trace of the two-signal-trace identity (source vs. output). */
 .output-code {
-  border-color: var(--cyan-dim);
+  border-color: var(--line-glow);
 }
 
 .editor .cm-editor,
@@ -443,16 +909,24 @@ input {
 }
 
 /* ---------------------------------------------------------------------
-   Actions
+   Bottom command console — golf level + import/export/passes/reset/run,
+   pinned below the stage regardless of which view is active (running
+   the golfer is a global action, not specific to the Source view).
 --------------------------------------------------------------------- */
-.actions {
+.console-bar {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 10px;
+  min-width: 0;
   flex-shrink: 0;
+  background-color: var(--bg-panel);
+  background-image: var(--circuit-vias);
+  background-repeat: no-repeat;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 12px;
 }
 
 .golf-level-field {
@@ -460,10 +934,10 @@ input {
   align-items: center;
   gap: 7px;
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: var(--fs-3);
   letter-spacing: 0.03em;
   text-transform: uppercase;
-  color: var(--paper-dim);
+  color: var(--text-dim);
   cursor: default;
   user-select: none;
   margin-right: auto;
@@ -471,16 +945,16 @@ input {
 }
 
 .golf-level-field:hover {
-  color: var(--paper);
+  color: var(--text-primary);
 }
 
 .golf-level-field select {
-  background: var(--ink);
-  color: var(--paper);
-  border: 1px solid var(--ink-line);
+  background: var(--bg-void);
+  color: var(--text-primary);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--fs-2);
   text-transform: none;
   letter-spacing: normal;
   padding: 2px 4px;
@@ -488,61 +962,72 @@ input {
 }
 
 /* ---------------------------------------------------------------------
-   Aggressive-passes popover — anchored to the "⚙ Passes" button via
-   `position: fixed` + JS-computed left/bottom (see main.ts), which lets
-   it escape `.panel`'s `overflow: hidden` instead of getting clipped by
-   it, and keeps opening it from ever pushing the rest of the panel's
-   layout around (unlike the old inline <details> block).
+   Aggressive-passes panel — a right-edge slide-in drawer (`.open`
+   toggles the transform), triggered by the "Passes" button in the
+   bottom command console. Escapes the stage's clipping via `position:
+   fixed` covering the full height of the viewport.
 --------------------------------------------------------------------- */
 button.btn.small {
-  font-size: 10.5px;
+  font-size: var(--fs-2);
   padding: 8px 10px;
 }
 
 .passes-popover {
   position: fixed;
+  top: 0;
+  right: 0;
   z-index: 50;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  min-width: 210px;
-  background: var(--ink-raised);
-  border: 1px solid var(--ink-line);
-  border-radius: var(--radius);
-  padding: 8px 10px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  width: 300px;
+  max-width: 86vw;
+  height: 100dvh;
+  background: var(--bg-raised);
+  border-left: 1px solid var(--line);
+  padding: 16px 14px;
+  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.5);
   font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--paper-dim);
+  font-size: var(--fs-2);
+  color: var(--text-dim);
+  overflow-y: auto;
+  transform: translateX(100%);
+  transition: transform 0.22s ease;
 }
 
 .passes-popover[hidden] {
   display: none;
 }
 
+.passes-popover.open {
+  transform: translateX(0);
+}
+
 .passes-popover label {
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 3px 2px;
+  padding: 5px 2px;
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
 }
 
 .passes-popover label:hover {
-  color: var(--paper);
+  color: var(--text-primary);
 }
 
-.passes-popover input {
-  accent-color: var(--cyan);
-  cursor: pointer;
-}
 
+/* "Circuit trace with via" separator instead of a plain <hr> —
+   ROADMAP.md Phase 2.3 — a thin trace broken by a small via pad at
+   its midpoint. */
 .passes-popover-sep {
   border: none;
-  border-top: 1px solid var(--ink-line);
+  height: 8px;
   margin: 4px 0;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='8' viewBox='0 0 100 8' preserveAspectRatio='none'><line x1='0' y1='4' x2='42' y2='4' stroke='%231c2230' stroke-width='1'/><line x1='58' y1='4' x2='100' y2='4' stroke='%231c2230' stroke-width='1'/><circle cx='50' cy='4' r='2.4' fill='none' stroke='%232a3550' stroke-width='1'/><circle cx='50' cy='4' r='0.8' fill='%232a3550'/></svg>");
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
 }
 
 .protected-names-field {
@@ -555,18 +1040,21 @@ button.btn.small {
 .protected-names-field input[type="text"] {
   cursor: text !important;
   width: 100%;
-  background: var(--ink);
-  border: 1px solid var(--ink-line);
+  background: var(--bg-void);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
-  color: var(--paper);
+  color: var(--text-primary);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--fs-2);
   padding: 4px 6px;
 }
 
 button.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--fs-3);
   font-weight: 500;
   letter-spacing: 0.03em;
   text-transform: uppercase;
@@ -574,8 +1062,25 @@ button.btn {
   padding: 9px 16px;
   cursor: pointer;
   border: 1px solid transparent;
-  transition: transform 0.08s ease, background 0.15s ease, border-color 0.15s ease;
+  transition: transform 0.08s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
   white-space: nowrap;
+}
+
+button.btn svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+button.btn.small svg,
+button.btn.copy svg {
+  width: 12px;
+  height: 12px;
+}
+
+.icon-btn svg {
+  width: 15px;
+  height: 15px;
 }
 
 button.btn:active {
@@ -583,33 +1088,51 @@ button.btn:active {
 }
 
 button.btn.primary {
-  background: var(--amber);
-  color: #1a1204;
-  border-color: var(--amber);
+  background: var(--acid-green);
+  color: var(--bg-void);
+  border-color: var(--acid-green);
 }
 button.btn.primary:hover {
-  background: #f0b357;
+  background: #5cffa0;
+  box-shadow: var(--glow-green);
+}
+
+/* Brief glow pulse on explicit user-triggered runs (button click or
+   Ctrl/Cmd+Enter) — see `pulseRunButton()` in main.ts. */
+button.btn.primary.pulse {
+  animation: run-pulse 450ms ease;
+}
+
+@keyframes run-pulse {
+  0%,
+  100% {
+    box-shadow: var(--glow-green);
+  }
+  50% {
+    box-shadow: 0 0 22px 4px rgba(57, 255, 136, 0.85);
+  }
 }
 
 button.btn.ghost {
   background: transparent;
-  color: var(--paper-dim);
-  border-color: var(--ink-line);
+  color: var(--text-dim);
+  border-color: var(--line);
 }
 button.btn.ghost:hover {
-  color: var(--paper);
-  border-color: var(--cyan-dim);
+  color: var(--text-primary);
+  border-color: var(--line-glow);
 }
 
 button.btn.copy {
   background: transparent;
-  color: var(--cyan);
-  border-color: var(--cyan-dim);
+  color: var(--signal-violet);
+  border-color: var(--line-glow);
   padding: 6px 12px;
-  font-size: 10.5px;
+  font-size: var(--fs-2);
 }
 button.btn.copy:hover {
-  border-color: var(--cyan);
+  border-color: var(--signal-violet);
+  box-shadow: var(--glow-violet);
 }
 
 /* ---------------------------------------------------------------------
@@ -619,10 +1142,10 @@ button.btn.copy:hover {
 --------------------------------------------------------------------- */
 .meter-block {
   margin-top: 10px;
-  border: 1px solid var(--ink-line);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 9px 12px;
-  background: #0c0f0b;
+  background: var(--bg-void);
   flex-shrink: 0;
 }
 
@@ -634,8 +1157,8 @@ button.btn.copy:hover {
 
 .meter-label {
   font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--paper-dim);
+  font-size: var(--fs-2);
+  color: var(--text-dim);
   text-transform: uppercase;
   letter-spacing: 0.1em;
   width: 92px;
@@ -651,39 +1174,75 @@ button.btn.copy:hover {
 .meter-ticks .tick {
   height: 14px;
   flex: 1;
-  background: var(--ink-line);
+  background: var(--line);
   border-radius: 1px;
   transition: background 0.25s ease, box-shadow 0.25s ease;
 }
 
+/* Per-tick color set inline via `--tick-color` (see `tickGradientColor()`
+   in main.ts) — a fixed red→amber→green sweep across the bar's
+   position, not the current ratio, so how far it reaches into the
+   green reads as "how good" at a glance. */
 .meter-ticks .tick.lit {
-  background: var(--amber);
-  box-shadow: 0 0 5px rgba(232, 163, 61, 0.6);
+  background: var(--tick-color, var(--acid-green));
 }
 
 .meter-value {
   font-family: var(--font-mono);
-  font-size: 14px;
+  font-size: var(--fs-4);
   font-weight: 600;
-  color: var(--amber);
+  color: var(--acid-green);
   width: 58px;
   text-align: right;
   flex-shrink: 0;
 }
 
+/* "System monitor" metric tiles (ROADMAP.md Phase 5) — each stat's own
+   bordered card, the number prominent with its label underneath,
+   rather than a flat inline "N label, N label" reading. No markup
+   change needed: `<b>NUMBER</b> <span>label</span>` inside a
+   `flex-direction: column` container already stacks in that order. */
 .stat-strip {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 14px;
+  gap: 6px;
   margin-top: 8px;
+}
+
+.stat-strip > span {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background-color: var(--bg-void);
   font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--paper-dim);
+  font-size: var(--fs-1);
+  color: var(--text-dim);
+  white-space: nowrap;
 }
 
 .stat-strip b {
-  color: var(--paper);
-  font-weight: 500;
+  color: var(--acid-green);
+  font-size: var(--fs-3);
+  font-weight: 600;
+}
+
+/* Per-pass/buffer reduction — a small filled-proportion bar next to the
+   in→out byte counts, the one literal "mini-graph" of this phase. */
+.stat-strip > span.per-pass-item {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.per-pass-bar {
+  width: 40px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 1px;
+  overflow: hidden;
 }
 
 .size-badges {
@@ -693,47 +1252,62 @@ button.btn.copy:hover {
   margin-top: 8px;
 }
 
+/* "Engraved plaque" competition badges (280B/512B/1k/4k/8k) — a medallion
+   icon (circle + check or cross) plus an inset shadow so the plate reads
+   as gravé/etched rather than a flat pill — ROADMAP.md Phase 2.3. */
 .size-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--fs-1);
   letter-spacing: 0.02em;
-  padding: 2px 6px;
+  padding: 2px 7px 2px 5px;
   border-radius: var(--radius);
-  border: 1px solid var(--ink-line);
-  color: var(--paper-dim);
+  border: 1px solid var(--line);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
+  color: var(--text-dim);
   cursor: default;
 }
 
+.size-badge svg {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+}
+
 .size-badge.fits {
-  color: var(--cyan);
-  border-color: var(--cyan-dim);
+  color: var(--acid-green);
+  border-color: var(--line-glow);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 4px rgba(57, 255, 136, 0.25);
 }
 
 /* ---------------------------------------------------------------------
    Viewport
 --------------------------------------------------------------------- */
-.panel-title .compare-toggle {
+.compare-toggle {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 7px;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--fs-2);
   letter-spacing: 0.03em;
   text-transform: none;
-  color: var(--paper-dim);
+  color: var(--text-dim);
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
 }
 
-.panel-title .compare-toggle:hover {
-  color: var(--paper);
+.compare-toggle:hover {
+  color: var(--text-primary);
 }
 
-.panel-title .compare-toggle input {
-  accent-color: var(--cyan);
-  cursor: pointer;
+.compare-toggle svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
 }
 
 .viewport-split {
@@ -748,10 +1322,14 @@ button.btn.copy:hover {
   flex: 1 1 0;
   min-width: 0;
   min-height: 0;
-  border: 1px solid var(--ink-line);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
   background: #000;
   overflow: hidden;
+  /* Custom reticle cursor over the live render — ROADMAP.md Phase 1.3.
+     Relative path for the same reason as the self-hosted fonts (this
+     project's `base: "./"` isn't applied to raw CSS `url()`s). */
+  cursor: url("../cursors/nightwire-crosshair.svg") 12 12, crosshair;
 }
 
 .viewport-frame[hidden] {
@@ -764,14 +1342,14 @@ button.btn.copy:hover {
   right: 12px;
   z-index: 1;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--fs-1);
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: var(--paper-dim);
-  background: rgba(10, 13, 11, 0.6);
+  color: var(--text-dim);
+  background: rgba(5, 6, 10, 0.6);
   padding: 4px 8px;
   border-radius: var(--radius);
-  border: 1px solid var(--ink-line);
+  border: 1px solid var(--line);
   pointer-events: none;
 }
 
@@ -790,17 +1368,17 @@ canvas#glcanvas-source {
   display: flex;
   gap: 14px;
   font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--paper-dim);
-  background: rgba(10, 13, 11, 0.6);
+  font-size: var(--fs-2);
+  color: var(--text-dim);
+  background: rgba(5, 6, 10, 0.6);
   padding: 4px 8px;
   border-radius: var(--radius);
-  border: 1px solid var(--ink-line);
+  border: 1px solid var(--line);
   pointer-events: none;
 }
 
 .viewport-hud .fps b {
-  color: var(--cyan);
+  color: var(--acid-green);
 }
 
 .viewport-controls {
@@ -815,23 +1393,24 @@ canvas#glcanvas-source {
   width: 30px;
   height: 30px;
   border-radius: var(--radius);
-  border: 1px solid var(--ink-line);
-  background: rgba(10, 13, 11, 0.75);
-  color: var(--paper);
+  border: 1px solid var(--line);
+  background: rgba(5, 6, 10, 0.75);
+  color: var(--text-primary);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
+  font-size: var(--fs-4);
 }
 .icon-btn:hover {
-  border-color: var(--cyan-dim);
-  color: var(--cyan);
+  border-color: var(--signal-violet);
+  color: var(--signal-violet);
+  box-shadow: var(--glow-violet);
 }
 
 .icon-btn.recording {
-  border-color: var(--danger);
-  color: var(--danger);
+  border-color: var(--blood-red);
+  color: var(--blood-red);
   animation: recording-pulse 1.2s ease-in-out infinite;
 }
 
@@ -847,11 +1426,11 @@ canvas#glcanvas-source {
 
 .warning-banner {
   margin-top: 8px;
-  border: 1px solid var(--amber-dim);
-  background: rgba(232, 163, 61, 0.08);
-  color: var(--amber);
+  border: 1px solid var(--amber-warn);
+  background: rgba(255, 176, 32, 0.08);
+  color: var(--amber-warn);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--fs-2);
   line-height: 1.55;
   border-radius: var(--radius);
   padding: 8px 10px;
@@ -864,14 +1443,29 @@ canvas#glcanvas-source {
   display: none;
 }
 
+/* Dedicated glyph per banner type (triangle vs. circle-slash) so
+   warning/error read as visually distinct at a glance, not just by
+   color — ROADMAP.md Phase 2.3. */
+.warning-banner::before {
+  content: "";
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+  vertical-align: -1px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='%23ffb020' d='M12 2 1 21h22L12 2zm0 6.5 1.2 8.2h-2.4L12 8.5zM12 19a1.3 1.3 0 1 1 0-2.6 1.3 1.3 0 0 1 0 2.6z'/></svg>");
+  background-size: contain;
+  background-repeat: no-repeat;
+}
+
 .error-banner {
   display: none;
   margin-top: 8px;
-  border: 1px solid var(--danger);
-  background: rgba(232, 97, 91, 0.08);
-  color: #ffb3ae;
+  border: 1px solid var(--blood-red);
+  background: rgba(255, 59, 78, 0.08);
+  color: #ffb3bb;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--fs-2);
   line-height: 1.55;
   border-radius: var(--radius);
   padding: 8px 10px;
@@ -884,34 +1478,37 @@ canvas#glcanvas-source {
   display: block;
 }
 
+.error-banner::before {
+  content: "";
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+  vertical-align: -1px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='%23ff3b4e' d='M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm4.2 12.8-1.4 1.4L12 13.4l-2.8 2.8-1.4-1.4L10.6 12 7.8 9.2l1.4-1.4L12 10.6l2.8-2.8 1.4 1.4L13.4 12l2.8 2.8z'/></svg>");
+  background-size: contain;
+  background-repeat: no-repeat;
+}
+
 /* ---------------------------------------------------------------------
-   Narrow-viewport fallback — guaranteeing a true zero-scroll 3-column
-   layout on any width/height (a phone in portrait, a non-maximized
-   laptop window) isn't realistic once a code editor is one of the
-   panels, so below this breakpoint the layout switches to one panel at
-   a time via `#tab-bar` instead — still zero page scroll, just a
-   single view instead of three side by side.
+   Narrow-viewport fallback — below this breakpoint the sidebar always
+   starts collapsed to icon-only (still user-togglable) and the bottom
+   console wraps onto more than one line rather than being squeezed.
 --------------------------------------------------------------------- */
-@media (max-width: 1400px), (max-height: 760px) {
-  .tab-bar {
-    display: flex;
+@media (max-width: 900px) {
+  :root {
+    --sidebar-w: var(--sidebar-w-collapsed);
   }
 
-  .workspace {
-    grid-template-columns: 1fr;
-  }
-
-  .resizer {
+  .sidebar .tab-btn span,
+  .sidebar .sidebar-collapse span {
     display: none;
   }
 
-  .panel,
-  .viewport-wrap {
-    display: none;
-  }
-
-  .panel.active-tab,
-  .viewport-wrap.active-tab {
-    display: flex;
+  .viewport-wrap:not(.active-tab) {
+    width: 180px;
+    height: 120px;
+    right: 10px;
+    bottom: 96px;
   }
 }

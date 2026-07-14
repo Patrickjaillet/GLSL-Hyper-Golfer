@@ -13,6 +13,34 @@ import { initWasmGolfer, wasmGolf } from "./wasmGolfer";
 import { createSourceEditor, createReadOnlyEditor, setEditorContent, setErrorLineHighlight } from "./editor";
 import { t, getLocale, setLocale, onLocaleChange } from "./i18n";
 import type { EditorView } from "@codemirror/view";
+import iconMark from "./assets/icons/icon-mark.svg?raw";
+import iconRun from "./assets/icons/icon-run.svg?raw";
+import iconReset from "./assets/icons/icon-reset.svg?raw";
+import iconImport from "./assets/icons/icon-import.svg?raw";
+import iconExport from "./assets/icons/icon-export.svg?raw";
+import iconPasses from "./assets/icons/icon-passes.svg?raw";
+import iconCopy from "./assets/icons/icon-copy.svg?raw";
+import iconPause from "./assets/icons/icon-pause.svg?raw";
+import iconPlay from "./assets/icons/icon-play.svg?raw";
+import iconScreenshot from "./assets/icons/icon-screenshot.svg?raw";
+import iconRecord from "./assets/icons/icon-record.svg?raw";
+import iconStop from "./assets/icons/icon-stop.svg?raw";
+import iconAdd from "./assets/icons/icon-add.svg?raw";
+import iconLang from "./assets/icons/icon-lang.svg?raw";
+import iconClose from "./assets/icons/icon-close.svg?raw";
+import iconSource from "./assets/icons/icon-source.svg?raw";
+import iconGolfed from "./assets/icons/icon-golfed.svg?raw";
+import iconViewport from "./assets/icons/icon-viewport.svg?raw";
+import iconCollapse from "./assets/icons/icon-collapse.svg?raw";
+import iconFormat from "./assets/icons/icon-format.svg?raw";
+import iconCompare from "./assets/icons/icon-compare.svg?raw";
+import iconSoundOn from "./assets/icons/icon-sound-on.svg?raw";
+import iconSoundOff from "./assets/icons/icon-sound-off.svg?raw";
+import nightwireWordmark from "./assets/brand/nightwire-wordmark.svg?raw";
+import iconBadgeFits from "./assets/icons/icon-badge-fits.svg?raw";
+import iconBadgeTooBig from "./assets/icons/icon-badge-toobig.svg?raw";
+import iconExpand from "./assets/icons/icon-expand.svg?raw";
+import iconShrink from "./assets/icons/icon-shrink.svg?raw";
 
 // Prefer the wasm build of the actual Rust engine — same code as the
 // CLI and cargo tests, so no TS/Rust divergence risk — falling back to
@@ -208,55 +236,43 @@ app.innerHTML = `
   <div class="shell">
     <header class="masthead">
       <div class="brand">
-        <span class="mark">GLSL⇥</span>
+        <span class="mark">${iconMark}</span>
         <h1 data-i18n-title="app.tagline" title="">Hyper-Golfing Engine</h1>
       </div>
-      <nav class="tab-bar" id="tab-bar">
-        <button class="tab-btn" data-tab="source" type="button" data-i18n="tab.source">Source</button>
-        <button class="tab-btn" data-tab="golfed" type="button" data-i18n="tab.golfed">Golfé</button>
-        <button class="tab-btn" data-tab="viewport" type="button" data-i18n="tab.viewport">Viewport</button>
-      </nav>
-      <button class="lang-toggle" id="lang-toggle" type="button" data-i18n-title="lang.toggle.title"></button>
+      <button class="lang-toggle" id="sound-toggle" type="button" aria-label=""></button>
+      <button class="lang-toggle" id="lang-toggle" type="button" data-i18n-title="lang.toggle.title" data-i18n-aria-label="lang.toggle.title">${iconLang}<span id="lang-toggle-label"></span></button>
       <div class="engine-pill" data-i18n-title="engine.tooltip" title="">
         <span class="dot cyan"></span><span data-i18n="engine.activeLabel">moteur actif : </span><b id="engine-label">…</b>
       </div>
     </header>
 
-    <div class="workspace" id="workspace">
-      <section class="panel active-tab" id="panel-source" data-panel="source">
-        <div class="buffer-tabs" id="buffer-tabs"></div>
-        <div class="channel-row" id="channel-row" hidden></div>
-        <div class="editor" id="source-editor-mount"></div>
-        <div class="actions">
-          <label class="golf-level-field" data-i18n-title="golfLevel.title" title="">
-            <span data-i18n="golfLevel.label">Niveau</span>
-            <select id="golf-level-select">
-              <option value="safe" data-i18n="golfLevel.safe">Sûr</option>
-              <option value="balanced" data-i18n="golfLevel.balanced">Équilibré</option>
-              <option value="aggressive" data-i18n="golfLevel.aggressive">Agressif</option>
-              <option value="custom" data-i18n="golfLevel.custom" hidden>Personnalisé</option>
-            </select>
-          </label>
-          <button class="btn ghost small" id="import-btn" type="button" data-i18n-title="btn.import.title" title="">⇩ Shadertoy</button>
-          <button class="btn ghost small" id="export-btn" type="button" data-i18n-title="btn.export.title" title="">⇧ Export</button>
-          <button class="btn ghost small" id="passes-btn" type="button" aria-haspopup="true" aria-expanded="false" data-i18n-title="btn.passes.title" title="">⚙ Passes</button>
-          <button class="btn ghost" id="reset-btn" type="button" data-i18n="btn.reset">Réinitialiser</button>
-          <button class="btn primary" id="run-btn" type="button" data-i18n="btn.run" data-i18n-title="btn.run.title" title="">Exécuter le golfing</button>
-        </div>
-      </section>
+    <main class="console">
+      <nav class="sidebar" id="sidebar">
+        <button class="tab-btn" data-tab="source" type="button" data-i18n-title="tab.source" data-i18n-aria-label="tab.source" title="" aria-label="">${iconSource}<span data-i18n="tab.source">Source</span></button>
+        <button class="tab-btn" data-tab="golfed" type="button" data-i18n-title="tab.golfed" data-i18n-aria-label="tab.golfed" title="" aria-label="">${iconGolfed}<span data-i18n="tab.golfed">Golfé</span></button>
+        <button class="tab-btn" data-tab="viewport" type="button" data-i18n-title="tab.viewport" data-i18n-aria-label="tab.viewport" title="" aria-label="">${iconViewport}<span data-i18n="tab.viewport">Viewport</span></button>
+        <div class="sidebar-watermark" aria-hidden="true">${nightwireWordmark}</div>
+        <button class="sidebar-collapse" id="sidebar-toggle" type="button" data-i18n-title="sidebar.toggle.title" data-i18n-aria-label="sidebar.toggle.title" title="" aria-label="">${iconCollapse}</button>
+      </nav>
 
-      <div class="resizer" id="resizer-1" tabindex="0" data-i18n-title="buffer.resizer.title" title=""></div>
+      <div class="stage" id="workspace">
+        <section class="panel active-tab" id="panel-source" data-panel="source">
+          <div class="buffer-tabs" id="buffer-tabs"></div>
+          <div class="channel-row" id="channel-row" hidden></div>
+          <div class="editor" id="source-editor-mount"></div>
+        </section>
 
-      <section class="panel" id="panel-golfed" data-panel="golfed">
-        <div class="panel-head">
-          <div class="panel-title"><span class="dot cyan"></span><span data-i18n="panel.golfed.prefix">Golfé — </span><span id="golfed-tab-label">Image</span></div>
-          <label class="pretty-toggle" data-i18n-title="toggle.pretty.title" title="">
-            <input type="checkbox" id="pretty-toggle" />
-            <span data-i18n="toggle.pretty.label">Version justifiée</span>
-          </label>
-          <button class="btn copy" id="copy-btn" type="button" data-i18n="btn.copy">Copier</button>
-        </div>
-        <div class="output-code" id="output-editor-mount"></div>
+        <section class="panel" id="panel-golfed" data-panel="golfed">
+          <div class="panel-head">
+            <div class="panel-title"><span class="dot cyan"></span><span data-i18n="panel.golfed.prefix">Golfé — </span><span id="golfed-tab-label">Image</span></div>
+            <label class="pretty-toggle" data-i18n-title="toggle.pretty.title" title="">
+              ${iconFormat}
+              <input type="checkbox" id="pretty-toggle" />
+              <span data-i18n="toggle.pretty.label">Version justifiée</span>
+            </label>
+            <button class="btn copy" id="copy-btn" type="button">${iconCopy}<span id="copy-btn-label" data-i18n="btn.copy">Copier</span></button>
+          </div>
+          <div class="output-code" id="output-editor-mount"></div>
 
         <div class="meter-block">
           <div class="meter-row">
@@ -291,36 +307,54 @@ app.innerHTML = `
         <div class="error-banner" id="error-banner" aria-live="assertive"></div>
       </section>
 
-      <div class="resizer" id="resizer-2" tabindex="0" data-i18n-title="buffer.resizer.title" title=""></div>
-
-      <div class="viewport-wrap" id="panel-viewport" data-panel="viewport">
-        <div class="panel-head">
-          <div class="panel-title"><span class="dot cyan"></span><span data-i18n="panel.viewport.title">Viewport temps réel</span></div>
-          <label class="compare-toggle" data-i18n-title="toggle.compare.title" title="">
-            <input type="checkbox" id="compare-toggle" />
-            <span data-i18n="toggle.compare.label">Comparer</span>
-          </label>
-        </div>
-        <div class="viewport-split">
-          <div class="viewport-frame" id="frame-source" hidden>
-            <div class="viewport-label" data-i18n="viewport.label.source">source</div>
-            <canvas id="glcanvas-source"></canvas>
+        <div class="viewport-wrap" id="panel-viewport" data-panel="viewport">
+          <div class="panel-head">
+            <div class="panel-title"><span class="dot cyan"></span><span data-i18n="panel.viewport.title">Viewport temps réel</span></div>
+            <label class="compare-toggle" data-i18n-title="toggle.compare.title" title="">
+              ${iconCompare}
+              <input type="checkbox" id="compare-toggle" />
+              <span data-i18n="toggle.compare.label">Comparer</span>
+            </label>
           </div>
-          <div class="viewport-frame" id="frame-golfed">
-            <div class="viewport-label" id="label-golfed" data-i18n="viewport.label.golfed" hidden>golfé</div>
-            <canvas id="glcanvas"></canvas>
-            <div class="viewport-hud">
-              <span class="fps"><b id="fps-value">--</b> fps</span>
-              <span id="res-value">--×--</span>
+          <div class="viewport-split">
+            <div class="viewport-frame" id="frame-source" hidden>
+              <div class="viewport-label" data-i18n="viewport.label.source">source</div>
+              <canvas id="glcanvas-source"></canvas>
             </div>
-            <div class="viewport-controls">
-              <button class="icon-btn" id="pause-btn" type="button" data-i18n-title="pause.title" data-i18n-aria-label="pause.ariaLabel" title="" aria-label="">⏸</button>
-              <button class="icon-btn" id="screenshot-btn" type="button" data-i18n-title="screenshot.title" data-i18n-aria-label="screenshot.title" title="" aria-label="">📷</button>
-              <button class="icon-btn" id="record-btn" type="button" data-i18n-title="record.title" data-i18n-aria-label="record.title" title="" aria-label="">⏺</button>
+            <div class="viewport-frame" id="frame-golfed">
+              <div class="viewport-label" id="label-golfed" data-i18n="viewport.label.golfed" hidden>golfé</div>
+              <canvas id="glcanvas"></canvas>
+              <div class="viewport-hud">
+                <span class="fps"><b id="fps-value">--</b> fps</span>
+                <span id="res-value">--×--</span>
+              </div>
+              <div class="viewport-controls">
+                <button class="icon-btn" id="pause-btn" type="button" data-i18n-title="pause.title" data-i18n-aria-label="pause.ariaLabel" title="" aria-label="">${iconPause}</button>
+                <button class="icon-btn" id="screenshot-btn" type="button" data-i18n-title="screenshot.title" data-i18n-aria-label="screenshot.title" title="" aria-label="">${iconScreenshot}</button>
+                <button class="icon-btn" id="record-btn" type="button" data-i18n-title="record.title" data-i18n-aria-label="record.title" title="" aria-label="">${iconRecord}</button>
+                <button class="icon-btn" id="zen-btn" type="button" data-i18n-title="zen.enter.title" data-i18n-aria-label="zen.enter.title" title="" aria-label="">${iconExpand}</button>
+              </div>
             </div>
           </div>
         </div>
       </div>
+    </main>
+
+    <div class="console-bar" id="console-bar">
+      <label class="golf-level-field" data-i18n-title="golfLevel.title" title="">
+        <span data-i18n="golfLevel.label">Niveau</span>
+        <select id="golf-level-select">
+          <option value="safe" data-i18n="golfLevel.safe">Sûr</option>
+          <option value="balanced" data-i18n="golfLevel.balanced">Équilibré</option>
+          <option value="aggressive" data-i18n="golfLevel.aggressive">Agressif</option>
+          <option value="custom" data-i18n="golfLevel.custom" hidden>Personnalisé</option>
+        </select>
+      </label>
+      <button class="btn ghost small" id="import-btn" type="button" data-i18n-title="btn.import.title" title="">${iconImport}<span>Shadertoy</span></button>
+      <button class="btn ghost small" id="export-btn" type="button" data-i18n-title="btn.export.title" title="">${iconExport}<span>Export</span></button>
+      <button class="btn ghost small" id="passes-btn" type="button" aria-haspopup="true" aria-expanded="false" data-i18n-title="btn.passes.title" title="">${iconPasses}<span>Passes</span></button>
+      <button class="btn ghost" id="reset-btn" type="button">${iconReset}<span data-i18n="btn.reset">Réinitialiser</span></button>
+      <button class="btn primary" id="run-btn" type="button" data-i18n-title="btn.run.title" title="">${iconRun}<span data-i18n="btn.run">Exécuter le golfing</span></button>
     </div>
 
     <div class="passes-popover" id="passes-popover" hidden>
@@ -360,6 +394,8 @@ app.innerHTML = `
         <input type="text" id="protected-names-input" data-i18n-placeholder="protectedNames.placeholder" placeholder="" />
       </label>
     </div>
+
+    <div class="system-log" id="system-log" aria-live="polite"></div>
   </div>
 `;
 
@@ -376,7 +412,9 @@ function applyTranslations(): void {
   document.querySelectorAll<HTMLInputElement>("[data-i18n-placeholder]").forEach((el) => {
     el.placeholder = t(el.dataset.i18nPlaceholder!);
   });
-  langToggle.textContent = getLocale() === "fr" ? "EN" : "FR";
+  langToggleLabel.textContent = getLocale() === "fr" ? "EN" : "FR";
+  updateSoundToggleUI();
+  updateZenButtonTitle();
   renderBufferTabs();
   renderChannelRow();
   renderOutput();
@@ -460,12 +498,20 @@ const passesPopover = document.getElementById("passes-popover") as HTMLElement;
 const importBtn = document.getElementById("import-btn") as HTMLButtonElement;
 const exportBtn = document.getElementById("export-btn") as HTMLButtonElement;
 const langToggle = document.getElementById("lang-toggle") as HTMLButtonElement;
+const langToggleLabel = document.getElementById("lang-toggle-label")!;
 const engineLabelEl = document.getElementById("engine-label")!;
 const errorBanner = document.getElementById("error-banner")!;
+const systemLog = document.getElementById("system-log")!;
+
+/** Latest-event footer strip (ROADMAP.md Phase 5) — purely informative, shows only the single most recent message. */
+function logEvent(message: string): void {
+  systemLog.textContent = message;
+}
 const warningBanner = document.getElementById("warning-banner")!;
 const runBtn = document.getElementById("run-btn") as HTMLButtonElement;
 const resetBtn = document.getElementById("reset-btn") as HTMLButtonElement;
 const copyBtn = document.getElementById("copy-btn") as HTMLButtonElement;
+const copyBtnLabel = document.getElementById("copy-btn-label")!;
 const prettyToggle = document.getElementById("pretty-toggle") as HTMLInputElement;
 const pauseBtn = document.getElementById("pause-btn") as HTMLButtonElement;
 const screenshotBtn = document.getElementById("screenshot-btn") as HTMLButtonElement;
@@ -478,10 +524,9 @@ const compareToggle = document.getElementById("compare-toggle") as HTMLInputElem
 const frameSource = document.getElementById("frame-source") as HTMLElement;
 const labelGolfed = document.getElementById("label-golfed")!;
 const canvasSource = document.getElementById("glcanvas-source") as HTMLCanvasElement;
-const workspaceEl = document.getElementById("workspace") as HTMLElement;
-const resizer1 = document.getElementById("resizer-1") as HTMLElement;
-const resizer2 = document.getElementById("resizer-2") as HTMLElement;
 const tabButtons = Array.from(document.querySelectorAll<HTMLButtonElement>(".tab-btn"));
+const sidebar = document.getElementById("sidebar") as HTMLElement;
+const sidebarToggle = document.getElementById("sidebar-toggle") as HTMLButtonElement;
 const panelSource = document.getElementById("panel-source")!;
 const panelGolfed = document.getElementById("panel-golfed")!;
 const panelViewport = document.getElementById("panel-viewport")!;
@@ -489,10 +534,29 @@ const panelViewport = document.getElementById("panel-viewport")!;
 langToggle.addEventListener("click", () => setLocale(getLocale() === "fr" ? "en" : "fr"));
 onLocaleChange(applyTranslations);
 
+// Red→amber→green gradient across the tick bar (ROADMAP.md Phase 5 "jauge
+// ... avec dégradé vert→rouge selon le taux de compression"): each tick's
+// color is fixed by its *position*, not the current ratio, so a poor
+// reduction (few ticks lit, all near the red end) and a strong one (most
+// ticks lit, sweeping through amber into green) read at a glance.
+function tickGradientColor(index: number, count: number): string {
+  const lerp = (a: number, b: number, t: number) => Math.round(a + (b - a) * t);
+  const RED: [number, number, number] = [255, 59, 78];
+  const AMBER: [number, number, number] = [255, 176, 32];
+  const GREEN: [number, number, number] = [57, 255, 136];
+  const t = index / Math.max(1, count - 1);
+  const [from, to, localT] = t < 0.5 ? [RED, AMBER, t / 0.5] : [AMBER, GREEN, (t - 0.5) / 0.5];
+  const r = lerp(from[0], to[0], localT);
+  const g = lerp(from[1], to[1], localT);
+  const b = lerp(from[2], to[2], localT);
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
 const TICK_COUNT = 24;
 for (let i = 0; i < TICK_COUNT; i++) {
   const tick = document.createElement("div");
   tick.className = "tick";
+  tick.style.setProperty("--tick-color", tickGradientColor(i, TICK_COUNT));
   ticks.appendChild(tick);
 }
 
@@ -651,13 +715,13 @@ function renderBufferTabs(): void {
       .map((id) => {
         const removable = BUFFER_SLOTS.includes(id as BufferSlot);
         const closeBtn = removable
-          ? `<span class="buffer-tab-close" data-remove="${id}" role="button" tabindex="0" title="${t("buffer.remove.title")}" aria-label="${t("buffer.remove.title")} (${BUFFER_LABELS[id]})">✕</span>`
+          ? `<span class="buffer-tab-close" data-remove="${id}" role="button" tabindex="0" title="${t("buffer.remove.title")}" aria-label="${t("buffer.remove.title")} (${BUFFER_LABELS[id]})">${iconClose}</span>`
           : "";
         return `<button class="buffer-tab-btn${id === currentTab ? " active" : ""}" data-buffer-tab="${id}" type="button" aria-pressed="${id === currentTab}">${BUFFER_LABELS[id]}${closeBtn}</button>`;
       })
       .join("") +
     (activeSlots().length < BUFFER_SLOTS.length
-      ? `<button class="buffer-tab-add" id="add-buffer-btn" type="button">${t("buffer.add")}</button>`
+      ? `<button class="buffer-tab-add" id="add-buffer-btn" type="button">${iconAdd}<span>${t("buffer.add").replace("+ ", "")}</span></button>`
       : "");
 
   bufferTabsEl.querySelectorAll<HTMLButtonElement>("[data-buffer-tab]").forEach((btn) => {
@@ -811,9 +875,12 @@ function resizeCanvas(): void {
 window.addEventListener("resize", resizeCanvas);
 
 // ---------------------------------------------------------------------
-// Tab mode (narrow viewports): only one of the 3 top-level panels is
-// shown at a time, switched via `#tab-bar` (hidden by CSS on wide
-// desktop layouts). Not to be confused with the buffer tabs above.
+// Console navigation: only one of the 3 top-level views is on-stage at
+// a time, switched via the sidebar (`#sidebar`, see the "Sidebar" JS
+// section below). Not to be confused with the buffer tabs above.
+// `panelViewport` is the one exception — it stays mounted (as a
+// picture-in-picture box, see style.css) even when it's not the active
+// view, so the WebGL render loop never stops.
 // ---------------------------------------------------------------------
 const tabPanels: Record<string, HTMLElement> = {
   source: panelSource,
@@ -829,113 +896,65 @@ function setActiveTab(name: string): void {
 tabButtons.forEach((b) => b.addEventListener("click", () => setActiveTab(b.dataset.tab!)));
 
 // ---------------------------------------------------------------------
-// Resizable columns (desktop 3-column layout only — hidden by CSS in
-// tab mode).
+// Sidebar — retractable icon rail (Source/Golfé/Viewport nav), replaces
+// the old resizable 3-column desktop layout entirely (ROADMAP.md Phase
+// 4): only one of the 3 top-level panels/viewport is on-stage at a
+// time (see `setActiveTab` above), navigated from here instead of a
+// horizontal tab bar. "Retractable" = icon-only vs icon+label, not
+// hide/show — the nav itself always stays reachable.
 // ---------------------------------------------------------------------
-const COLUMN_STORAGE_KEY = "glslgolf-columns";
-const MIN_COLUMN_WIDTH = 240;
-
-function loadColumnWidths(): [number, number] {
+const SIDEBAR_STORAGE_KEY = "glslgolf-sidebar-collapsed";
+function loadSidebarCollapsed(): boolean {
   try {
-    const raw = localStorage.getItem(COLUMN_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && typeof parsed[0] === "number" && typeof parsed[1] === "number") {
-        return [parsed[0], parsed[1]];
-      }
-    }
+    return localStorage.getItem(SIDEBAR_STORAGE_KEY) === "1";
   } catch {
-    /* corrupt/unavailable storage — fall back to defaults below */
-  }
-  return [420, 420];
-}
-
-function saveColumnWidths(w1: number, w2: number): void {
-  try {
-    localStorage.setItem(COLUMN_STORAGE_KEY, JSON.stringify([w1, w2]));
-  } catch {
-    /* storage unavailable (private mode, quota) — resizing still works, just not persisted */
+    return false;
   }
 }
-
-let [colW1, colW2] = loadColumnWidths();
-
-function applyColumnWidths(): void {
-  workspaceEl.style.setProperty("--w1", `${colW1}px`);
-  workspaceEl.style.setProperty("--w2", `${colW2}px`);
+function setSidebarCollapsed(collapsed: boolean): void {
+  sidebar.classList.toggle("collapsed", collapsed);
+  try {
+    localStorage.setItem(SIDEBAR_STORAGE_KEY, collapsed ? "1" : "0");
+  } catch {
+    /* storage unavailable — collapse state just won't survive a reload */
+  }
 }
-applyColumnWidths();
-
-function makeResizer(handle: HTMLElement, which: 1 | 2): void {
-  let dragging = false;
-  let startX = 0;
-  let startW = 0;
-
-  const setWidth = (v: number) => {
-    const clamped = Math.max(MIN_COLUMN_WIDTH, v);
-    if (which === 1) colW1 = clamped;
-    else colW2 = clamped;
-    applyColumnWidths();
-  };
-
-  handle.addEventListener("pointerdown", (e) => {
-    dragging = true;
-    startX = e.clientX;
-    startW = which === 1 ? colW1 : colW2;
-    handle.setPointerCapture(e.pointerId);
-    document.body.classList.add("resizing");
-  });
-  handle.addEventListener("pointermove", (e) => {
-    if (!dragging) return;
-    setWidth(startW + (e.clientX - startX));
-  });
-  const stopDrag = () => {
-    if (!dragging) return;
-    dragging = false;
-    document.body.classList.remove("resizing");
-    saveColumnWidths(colW1, colW2);
-    resizeCanvas();
-  };
-  handle.addEventListener("pointerup", stopDrag);
-  handle.addEventListener("pointercancel", stopDrag);
-
-  handle.addEventListener("keydown", (e) => {
-    const step = 24;
-    if (e.key === "ArrowLeft") {
-      setWidth((which === 1 ? colW1 : colW2) - step);
-    } else if (e.key === "ArrowRight") {
-      setWidth((which === 1 ? colW1 : colW2) + step);
-    } else {
-      return;
-    }
-    e.preventDefault();
-    saveColumnWidths(colW1, colW2);
-    resizeCanvas();
-  });
-}
-makeResizer(resizer1, 1);
-makeResizer(resizer2, 2);
+setSidebarCollapsed(loadSidebarCollapsed());
+sidebarToggle.addEventListener("click", () => setSidebarCollapsed(!sidebar.classList.contains("collapsed")));
 
 // ---------------------------------------------------------------------
-// Aggressive-passes popover.
+// Aggressive-passes panel — a right-edge slide-in drawer (replaces the
+// old anchored floating popover) toggled by the "Passes" button in the
+// bottom command console.
 // ---------------------------------------------------------------------
+// Focus follows the drawer open/close (ROADMAP.md Phase 7 "navigation
+// clavier complète") — a sighted mouse user can already see it slide
+// in, but a keyboard user tabbing past `passesBtn` would otherwise land
+// back in the command console instead of inside the panel they just
+// opened, and closing it (Escape or an outside click) would strand
+// focus on whatever was last focused inside rather than sensibly
+// returning it to the button that opened it.
 function closePopover(): void {
-  passesPopover.hidden = true;
+  const wasOpen = passesPopover.classList.contains("open");
+  passesPopover.classList.remove("open");
   passesBtn.setAttribute("aria-expanded", "false");
+  if (wasOpen && passesPopover.contains(document.activeElement)) passesBtn.focus();
 }
 function openPopover(): void {
-  const rect = passesBtn.getBoundingClientRect();
-  passesPopover.style.left = `${rect.left}px`;
-  passesPopover.style.bottom = `${window.innerHeight - rect.top + 8}px`;
   passesPopover.hidden = false;
+  requestAnimationFrame(() => passesPopover.classList.add("open"));
   passesBtn.setAttribute("aria-expanded", "true");
+  passesPopover.querySelector<HTMLElement>("input, button, [tabindex]")?.focus();
 }
 passesBtn.addEventListener("click", (e) => {
   e.stopPropagation();
-  if (passesPopover.hidden) openPopover();
+  if (!passesPopover.classList.contains("open")) openPopover();
   else closePopover();
 });
 passesPopover.addEventListener("click", (e) => e.stopPropagation());
+passesPopover.addEventListener("transitionend", () => {
+  if (!passesPopover.classList.contains("open")) passesPopover.hidden = true;
+});
 document.addEventListener("click", closePopover);
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closePopover();
@@ -944,7 +963,9 @@ document.addEventListener("keydown", (e) => {
   // default, so it bubbles to this document-level listener normally.
   if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();
+    pulseRunButton();
     golfProject();
+    notifyRunResult();
   }
 });
 window.addEventListener("resize", closePopover);
@@ -1020,14 +1041,17 @@ let lastResults: Partial<Record<Exclude<BufferId, "common">, GolfResult>> = {};
 /** Renders the currently selected tab's golfed code into the read-only editor, reformatted if "Version justifiée" is checked. */
 function renderOutput(): void {
   if (currentTab === "common") {
+    outputEditorMount.classList.add("empty");
     setEditorContent(outputEditor, t("output.commonPlaceholder"));
     return;
   }
   const result = lastResults[currentTab as Exclude<BufferId, "common">];
   if (!result) {
+    outputEditorMount.classList.add("empty");
     setEditorContent(outputEditor, t("output.placeholder"));
     return;
   }
+  outputEditorMount.classList.remove("empty");
   setEditorContent(outputEditor, prettyToggle.checked ? prettyPrintGolfed(result.code) : result.code);
 }
 
@@ -1055,7 +1079,7 @@ function renderSizeBadges(totalBytes: number): void {
     const title = fits
       ? t("sizeBadge.fits", { label: cls.label, limit: String(cls.bytes) })
       : t("sizeBadge.tooBig", { label: cls.label, limit: String(cls.bytes), over: String(totalBytes - cls.bytes) });
-    return `<span class="size-badge${fits ? " fits" : ""}" title="${title}">${fits ? "✓" : "✗"} ${cls.label}</span>`;
+    return `<span class="size-badge${fits ? " fits" : ""}" title="${title}">${fits ? iconBadgeFits : iconBadgeTooBig}<span>${cls.label}</span></span>`;
   }).join("");
 }
 
@@ -1119,14 +1143,28 @@ function golfProject(): void {
     .map((p) => {
       const r = lastResults[p.id]!;
       const pct = r.stats.inputChars === 0 ? 0 : ((r.stats.inputChars - r.stats.outputChars) / r.stats.inputChars) * 100;
-      return `<span>${BUFFER_LABELS[p.id]} : <b>${r.stats.inputChars}</b>→<b>${r.stats.outputChars}</b> (${pct.toFixed(0)}%)</span>`;
+      const barWidth = Math.max(0, Math.min(40, (pct / 100) * 40));
+      // Mini "system monitor" bar per buffer/pass — the reduction ratio
+      // as a filled proportion, not just the raw percentage text
+      // (ROADMAP.md Phase 5). `style="fill:var(--x)"` rather than a
+      // `fill="var(--x)"` presentation attribute: SVG presentation
+      // attributes don't resolve CSS custom properties, only real CSS
+      // (the `style` attribute, or a stylesheet rule) does.
+      return `<span class="per-pass-item">${BUFFER_LABELS[p.id]}
+        <svg class="per-pass-bar" viewBox="0 0 40 6" preserveAspectRatio="none" aria-hidden="true">
+          <rect width="40" height="6" style="fill:var(--line)"/>
+          <rect width="${barWidth.toFixed(1)}" height="6" style="fill:var(--acid-green)"/>
+        </svg>
+        <b>${r.stats.inputChars}</b>→<b>${r.stats.outputChars}</b> (${pct.toFixed(0)}%)</span>`;
     })
     .join("");
 
   const pct = totalIn === 0 ? 0 : Math.max(0, Math.min(100, ((totalIn - totalOut) / totalIn) * 100));
   ratioValue.textContent = `${pct.toFixed(1)}%`;
   const litCount = Math.round((pct / 100) * TICK_COUNT);
+  ratioValue.style.color = tickGradientColor(Math.max(0, litCount - 1), TICK_COUNT);
   Array.from(ticks.children).forEach((el, i) => {
+    (el as HTMLElement).style.boxShadow = i < litCount ? `0 0 5px ${tickGradientColor(i, TICK_COUNT)}` : "";
     el.classList.toggle("lit", i < litCount);
   });
 
@@ -1175,7 +1213,87 @@ function golfProject(): void {
   resizeCanvas();
 }
 
-runBtn.addEventListener("click", golfProject);
+// ---------------------------------------------------------------------
+// Optional sound feedback — a discreet synthesized beep on explicit
+// runs (distinct pitch for success vs. compile error), off by default
+// (ROADMAP.md Phase 3). Web Audio rather than an audio file asset — no
+// asset pipeline needed for a couple of short blips — and it only ever
+// fires from a real user gesture (this toggle or the run button),
+// which keeps it clear of autoplay restrictions.
+// ---------------------------------------------------------------------
+const soundToggle = document.getElementById("sound-toggle") as HTMLButtonElement;
+const SOUND_STORAGE_KEY = "glslgolf-sound-enabled";
+let soundEnabled = false;
+try {
+  soundEnabled = localStorage.getItem(SOUND_STORAGE_KEY) === "1";
+} catch {
+  /* storage unavailable — sound just stays off by default */
+}
+let audioCtx: AudioContext | null = null;
+
+function updateSoundToggleUI(): void {
+  soundToggle.innerHTML = soundEnabled ? iconSoundOn : iconSoundOff;
+  const title = t(soundEnabled ? "sound.toggle.title.on" : "sound.toggle.title.off");
+  soundToggle.title = title;
+  soundToggle.setAttribute("aria-label", title);
+}
+updateSoundToggleUI();
+
+function beep(freq: number, durationMs: number): void {
+  if (!soundEnabled) return;
+  try {
+    audioCtx ??= new AudioContext();
+    const ctx = audioCtx;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "square";
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.05, ctx.currentTime + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + durationMs / 1000);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + durationMs / 1000 + 0.02);
+  } catch {
+    /* Web Audio unavailable/blocked — silently skip, this is decoration only */
+  }
+}
+
+function notifyRunResult(): void {
+  if (errorBanner.classList.contains("visible")) {
+    beep(160, 140);
+    logEvent(t("log.runError"));
+  } else {
+    beep(880, 90);
+    logEvent(t("log.runOk", { pct: ratioValue.textContent ?? "" }));
+  }
+}
+
+soundToggle.addEventListener("click", () => {
+  soundEnabled = !soundEnabled;
+  try {
+    localStorage.setItem(SOUND_STORAGE_KEY, soundEnabled ? "1" : "0");
+  } catch {
+    /* storage unavailable — preference just won't survive a reload */
+  }
+  updateSoundToggleUI();
+});
+
+// Brief glow pulse on explicit user-triggered runs (button click or
+// Ctrl/Cmd+Enter) — `golfProject()` itself runs synchronously and is
+// also called internally on every auto-golf event (buffer switch,
+// locale change, ...), which shouldn't flash the button each time.
+function pulseRunButton(): void {
+  runBtn.classList.remove("pulse");
+  void runBtn.offsetWidth; // restart the CSS animation if already running
+  runBtn.classList.add("pulse");
+}
+runBtn.addEventListener("click", () => {
+  pulseRunButton();
+  golfProject();
+  notifyRunResult();
+});
 golfLevelSelect.addEventListener("change", () => {
   if (golfLevelSelect.value === "custom") return; // not a real user choice, just the sync target
   applyGolfLevel(golfLevelSelect.value as GolfLevel);
@@ -1209,9 +1327,9 @@ copyBtn.addEventListener("click", async () => {
   if (!result) return;
   try {
     await navigator.clipboard.writeText(result.code);
-    const original = copyBtn.textContent;
-    copyBtn.textContent = t("btn.copy.done");
-    setTimeout(() => (copyBtn.textContent = original), 1200);
+    const original = copyBtnLabel.textContent;
+    copyBtnLabel.textContent = t("btn.copy.done");
+    setTimeout(() => (copyBtnLabel.textContent = original), 1200);
   } catch {
     /* clipboard permission denied — silently ignore, code is still visible/selectable */
   }
@@ -1222,7 +1340,7 @@ pauseBtn.addEventListener("click", () => {
   paused = !paused;
   mpRunner?.setPaused(paused);
   legacyRunner?.setPaused(paused);
-  pauseBtn.textContent = paused ? "▶" : "⏸";
+  pauseBtn.innerHTML = paused ? iconPlay : iconPause;
 });
 
 screenshotBtn.addEventListener("click", () => {
@@ -1231,7 +1349,10 @@ screenshotBtn.addEventListener("click", () => {
   // synchronously against the buffer's current contents, before the
   // next requestAnimationFrame draw call has a chance to touch it.
   canvas.toBlob((blob) => {
-    if (blob) downloadBlob(blob, `glsl-golf-${Date.now()}.png`);
+    if (blob) {
+      downloadBlob(blob, `glsl-golf-${Date.now()}.png`);
+      logEvent(t("log.screenshot"));
+    }
   }, "image/png");
 });
 
@@ -1253,12 +1374,46 @@ recordBtn.addEventListener("click", () => {
   };
   mediaRecorder.onstop = () => {
     downloadBlob(new Blob(recordedChunks, { type: "video/webm" }), `glsl-golf-${Date.now()}.webm`);
-    recordBtn.textContent = "⏺";
+    recordBtn.innerHTML = iconRecord;
     recordBtn.classList.remove("recording");
+    logEvent(t("log.recordStop"));
   };
   mediaRecorder.start();
-  recordBtn.textContent = "⏹";
+  recordBtn.innerHTML = iconStop;
   recordBtn.classList.add("recording");
+  logEvent(t("log.recordStart"));
+});
+
+// ---------------------------------------------------------------------
+// Stealth fullscreen ("zen mode") — hides the masthead, sidebar, and
+// command console entirely, leaving just the render and its own
+// minimal overlay controls edge-to-edge (ROADMAP.md Phase 4, "prise de
+// contrôle furtive"). An in-app CSS mode rather than the browser
+// Fullscreen API: it needs to force the Viewport tab active and still
+// let Escape/the same button exit it, which is simpler to own directly
+// than to reconcile with `fullscreenchange` events and OS chrome.
+// ---------------------------------------------------------------------
+const shellEl = document.querySelector(".shell") as HTMLElement;
+const zenBtn = document.getElementById("zen-btn") as HTMLButtonElement;
+let zenMode = false;
+
+function updateZenButtonTitle(): void {
+  const title = t(zenMode ? "zen.exit.title" : "zen.enter.title");
+  zenBtn.title = title;
+  zenBtn.setAttribute("aria-label", title);
+}
+
+function setZenMode(on: boolean): void {
+  zenMode = on;
+  shellEl.classList.toggle("zen-mode", on);
+  if (on) setActiveTab("viewport");
+  zenBtn.innerHTML = on ? iconShrink : iconExpand;
+  updateZenButtonTitle();
+  resizeCanvas();
+}
+zenBtn.addEventListener("click", () => setZenMode(!zenMode));
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && zenMode) setZenMode(false);
 });
 
 // ---------------------------------------------------------------------
@@ -1322,11 +1477,13 @@ async function importFromShadertoy(): Promise<void> {
     const data = await res.json();
     if (data.Error) {
       window.alert(t("shadertoy.apiError") + data.Error);
+      logEvent(t("log.importFailed"));
       return;
     }
     applyShadertoyShader(data.Shader as ShadertoyShader);
   } catch (e) {
     window.alert(t("shadertoy.importFailed") + String(e) + t("shadertoy.corsNote"));
+    logEvent(t("log.importFailed"));
   }
 }
 
@@ -1381,6 +1538,7 @@ function applyShadertoyShader(shader: ShadertoyShader): void {
   imageState = newImage;
   switchTab("image");
   golfProject();
+  logEvent(t("log.importOk"));
 
   if (unsupported.length > 0) {
     window.alert(t("shadertoy.importLimitations") + unsupported.join("\n"));
@@ -1434,7 +1592,82 @@ function exportToShadertoy(): void {
 
   const json = JSON.stringify({ Shader: { info: { name: "Exported from GLSL Hyper-Golfer" }, renderpass: passes } }, null, 2);
   downloadBlob(new Blob([json], { type: "application/json" }), "shadertoy-export.json");
+  logEvent(t("log.exportOk"));
 }
+
+// ---------------------------------------------------------------------
+// Discreet network-particle background — pure decoration (ROADMAP.md
+// Phase 3, P2): a handful of drifting nodes with a faint connecting
+// line when two happen to be close, "onion routing" flavor. Skipped
+// entirely under prefers-reduced-motion (not just slowed down — the
+// canvas is never created), and capped low (28 nodes, one canvas,
+// nothing per-frame beyond an O(n²) distance check on that small n) to
+// stay performance-safe alongside the WebGL viewport's own render loop.
+// ---------------------------------------------------------------------
+function startBackgroundParticles(): void {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const canvas = document.createElement("canvas");
+  canvas.id = "bg-particles";
+  document.body.prepend(canvas);
+  const ctx2d = canvas.getContext("2d");
+  if (!ctx2d) return;
+
+  const COUNT = 28;
+  const LINK_DIST = 130;
+  let particles: { x: number; y: number; vx: number; vy: number }[] = [];
+
+  function resize(): void {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+  function seed(): void {
+    particles = Array.from({ length: COUNT }, () => ({
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height,
+      vx: (Math.random() - 0.5) * 0.15,
+      vy: (Math.random() - 0.5) * 0.15,
+    }));
+  }
+  resize();
+  seed();
+  window.addEventListener("resize", resize);
+
+  function tick(): void {
+    ctx2d!.clearRect(0, 0, canvas.width, canvas.height);
+    for (const p of particles) {
+      p.x += p.vx;
+      p.y += p.vy;
+      if (p.x < 0 || p.x > canvas.width) p.vx *= -1;
+      if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
+    }
+    ctx2d!.fillStyle = "rgba(57, 255, 136, 0.35)";
+    for (const p of particles) {
+      ctx2d!.beginPath();
+      ctx2d!.arc(p.x, p.y, 1.4, 0, Math.PI * 2);
+      ctx2d!.fill();
+    }
+    for (let i = 0; i < particles.length; i++) {
+      for (let j = i + 1; j < particles.length; j++) {
+        const a = particles[i]!;
+        const b = particles[j]!;
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < LINK_DIST) {
+          ctx2d!.strokeStyle = `rgba(178, 107, 255, ${0.12 * (1 - dist / LINK_DIST)})`;
+          ctx2d!.lineWidth = 1;
+          ctx2d!.beginPath();
+          ctx2d!.moveTo(a.x, a.y);
+          ctx2d!.lineTo(b.x, b.y);
+          ctx2d!.stroke();
+        }
+      }
+    }
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+startBackgroundParticles();
 
 importBtn.addEventListener("click", () => void importFromShadertoy());
 exportBtn.addEventListener("click", exportToShadertoy);
@@ -1443,7 +1676,26 @@ applyTranslations();
 setActiveTab("source");
 resizeCanvas();
 syncGolfLevelSelect();
+// ---------------------------------------------------------------------
+// Typing effect for the "engine active" status line — purely cosmetic
+// (Phase 3), so it degrades to an instant plain-text set under
+// `prefers-reduced-motion: reduce` rather than skip the content.
+// ---------------------------------------------------------------------
+function typeStatus(el: HTMLElement, text: string): void {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    el.textContent = text;
+    return;
+  }
+  let i = 0;
+  const step = () => {
+    el.textContent = text.slice(0, i);
+    i++;
+    if (i <= text.length) window.setTimeout(step, 16);
+  };
+  step();
+}
+
 wasmReady.finally(() => {
-  engineLabelEl.textContent = engineLabel;
+  typeStatus(engineLabelEl, engineLabel);
   golfProject();
 });
