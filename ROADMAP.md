@@ -11,6 +11,34 @@
 
 ---
 
+License and Copyright:
+
+**Hyper-Golfing Engine**
+Copyright © 2026 SANDEFJORD DEVELOPMENT — All rights reserved
+Creator: Patrick JAILLET
+Email: contact.shaderstudio@gmail.com
+Website: https://github.com/Patrickjaillet
+Official Repository: https://github.com/Patrickjaillet/GLSL-Hyper-Golfer
+
+---
+
+Development Conventions:
+
+- [ ] General language only English
+- [ ] Theme only White or system for application
+- [ ] No comments in the source code
+- [ ] Every added feature must be reflected in this ROADMAP.md
+- [ ] Automatic software version serialization for each Phase and each build
+- [ ] Every modification must be reflected for the end-user in the CHANGELOG.md
+- [ ] The README.md must be created and updated for the end-user with every modification and include a software screenshot
+- [ ] Systematic synchronization with the https://github.com/Patrickjaillet/GLSL-Hyper-Golfer repository upon every project modification
+- [ ] Never integrate Claude AI into GitHub, the files, or the GitHub contributors list
+- [ ] Creation of all files and documents required for the GitHub repository
+- [ ] Integrate copyright / Creator / Email / Website information into an "About" tab
+- [ ] MIT license
+
+---
+
 ## État des lieux (audité le 2026-07-14, avant d'écrire ce document)
 
 Le moteur actuel (~3100 lignes Rust + miroir TS) est un **golfeur au
@@ -96,11 +124,43 @@ golfer plus fort simplement en étant mieux exploité.
       du périmètre de cet item, qui porte sur le *résultat* du golf,
       pas sa performance d'exécution (voir Phase 5 pour un futur suivi
       de perf si besoin).
-- [ ] (P1) **Tableau de bord de progression.** Publier (script, pas
-      forcément une UI) l'évolution du total golfé sur le corpus au fil
-      des commits — sert à la fois de garde-fou (Phase 0, ci-dessus) et
-      de preuve concrète des progrès pour revendiquer "le plus
-      puissant au monde" avec des chiffres, pas juste une affirmation.
+- [x] (P1) **Tableau de bord de progression.** `scripts/golf-progress-dashboard.mjs`
+      (script, pas d'UI, comme demandé) — deux modes.
+      **Mode rapide (défaut)** : relit l'historique déjà committé de
+      `scripts/golf-size-baseline.json` (un commit par item de cette
+      roadmap qui touche la puissance de golfing) et calcule, en plus du
+      total brut, un total "sous-ensemble commun" restreint aux fixtures
+      présentes à *chaque* commit de l'historique — pour ne pas
+      confondre "golfe mieux" avec "teste plus" quand le corpus grossit.
+      **Un vrai piège trouvé en construisant cette métrique, pas
+      seulement anticipé** : même le sous-ensemble commun peut *grossir*
+      dans le temps, non pas parce que le moteur golfe moins bien, mais
+      parce que le **texte source** d'une fixture existante est étendu
+      avec de nouvelles lignes (ex. `constant_folding.glsl` allongée en
+      Phase 1.1) — un total plus gros pour le même nom de fixture ne
+      prouve donc rien sur la puissance du moteur à lui seul. Documenté
+      explicitement dans la sortie du mode rapide plutôt que laissé
+      comme un biais silencieux.
+      **Mode rigoureux (`--replay`)**, ajouté pour cette raison précise :
+      reconstruit le binaire CLI Rust tel qu'il existait à chaque commit
+      historique (via un `git worktree` jetable, un `cargo build
+      --release` par commit) et le fait tourner sur les fixtures
+      **actuelles, gelées** — isolant la seule variable qui compte
+      vraiment (le moteur golfe-t-il le *même* texte en moins d'octets
+      avec le temps) du bruit de croissance du corpus. Plus lent (un
+      build Rust complet par commit, ~15-30s chacun), donc optionnel.
+      **Chiffres réels obtenus en exécutant le mode `--replay`, pas
+      inventés** : sur les 24 fixtures actuelles, les 7 commits de
+      l'historique de `golf-size-baseline.json`
+      (`5d2b7fa`→`76ef4fc`) golfent respectivement **4596 → 4522 → 4526
+      → 4504 → 4431 → 4431 → 4407 octets**, soit **-4.1% net** sur le
+      même corpus figé. Résultat honnête, pas cherry-picked : un item
+      (`740bc20`, comparaison décimal/scientifique) montre même une
+      légère régression locale (+4 octets) sur ce corpus précis avant
+      que l'item suivant ne la recouvre largement — cohérent avec "Notes
+      de méthode" ci-dessous (mesurer plutôt qu'affirmer). Rapport
+      généré committé dans `PROGRESS.md` (régénérable à volonté, pas
+      maintenu à la main).
 
 ---
 
