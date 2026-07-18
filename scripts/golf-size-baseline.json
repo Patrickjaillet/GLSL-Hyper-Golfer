@@ -1,5 +1,5 @@
 {
-  "totalBytes": 4428,
+  "totalBytes": 4610,
   "perFixture": {
     "already_broken.glsl": 68,
     "block_scope_renaming.glsl": 248,
@@ -8,7 +8,7 @@
     "constant_folding.glsl": 330,
     "constant_vector_from_folded_values.glsl": 109,
     "constant_vectors.glsl": 189,
-    "dead_functions.glsl": 148,
+    "dead_functions.glsl": 49,
     "dead_locals.glsl": 115,
     "dead_stores.glsl": 182,
     "declaration_heuristic.glsl": 117,
@@ -17,6 +17,7 @@
     "duplicate_precision.glsl": 115,
     "fractal.glsl": 495,
     "increment_decrement.glsl": 160,
+    "inline_single_call.glsl": 281,
     "macro_only_reference.glsl": 97,
     "numbers_and_ambiguity.glsl": 205,
     "parens.glsl": 195,

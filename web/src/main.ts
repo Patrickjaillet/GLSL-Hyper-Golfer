@@ -369,6 +369,9 @@ app.innerHTML = `
       <label data-i18n-title="pass.deadFunctions.title" title="">
         <input type="checkbox" id="pass-dead-functions" checked /><span data-i18n="pass.deadFunctions.label">fonctions mortes</span>
       </label>
+      <label data-i18n-title="pass.inlineSingleCall.title" title="">
+        <input type="checkbox" id="pass-inline-single-call" checked /><span data-i18n="pass.inlineSingleCall.label">fonctions en ligne</span>
+      </label>
       <label data-i18n-title="pass.foldConstants.title" title="">
         <input type="checkbox" id="pass-fold-constants" checked /><span data-i18n="pass.foldConstants.label">constantes</span>
       </label>
@@ -480,6 +483,7 @@ const golfLevelSelect = document.getElementById("golf-level-select") as HTMLSele
 const passDeadLocals = document.getElementById("pass-dead-locals") as HTMLInputElement;
 const passDeadStores = document.getElementById("pass-dead-stores") as HTMLInputElement;
 const passDeadFunctions = document.getElementById("pass-dead-functions") as HTMLInputElement;
+const passInlineSingleCall = document.getElementById("pass-inline-single-call") as HTMLInputElement;
 const passFoldConstants = document.getElementById("pass-fold-constants") as HTMLInputElement;
 const passConstantVectors = document.getElementById("pass-constant-vectors") as HTMLInputElement;
 const passCompound = document.getElementById("pass-compound") as HTMLInputElement;
@@ -494,6 +498,7 @@ const passCheckboxes = [
   passDeadLocals,
   passDeadStores,
   passDeadFunctions,
+  passInlineSingleCall,
   passFoldConstants,
   passConstantVectors,
   passCompound,
@@ -1050,6 +1055,7 @@ function currentAggressiveOptions(): AggressiveOptions {
     eliminateDeadLocals: passDeadLocals.checked,
     eliminateDeadStores: passDeadStores.checked,
     eliminateDeadFunctions: passDeadFunctions.checked,
+    inlineSingleCallFunctions: passInlineSingleCall.checked,
     foldConstants: passFoldConstants.checked,
     reduceConstantVectors: passConstantVectors.checked,
     stripTrailingVoidReturn: passTrailingReturn.checked,

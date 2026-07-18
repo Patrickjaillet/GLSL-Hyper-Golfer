@@ -33,6 +33,7 @@ pub struct AggressiveStats {
     pub redundant_parens_removed: usize,
     pub duplicate_precision_removed: usize,
     pub dead_functions_removed: usize,
+    pub functions_inlined: usize,
 }
 
 pub(crate) fn is_unary_prefix(c: char) -> bool {

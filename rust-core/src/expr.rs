@@ -304,7 +304,7 @@ fn parse_postfix(items: &[Item], start: usize) -> Option<Expr> {
 /// Requires the whole span to be consumed exactly — any leftover
 /// token before `end_before` means malformed input, declined rather
 /// than guessed at.
-fn parse_arg_list(items: &[Item], start: usize, end_before: usize) -> Option<Vec<Expr>> {
+pub(crate) fn parse_arg_list(items: &[Item], start: usize, end_before: usize) -> Option<Vec<Expr>> {
     let mut args = Vec::new();
     if start == end_before {
         return Some(args);

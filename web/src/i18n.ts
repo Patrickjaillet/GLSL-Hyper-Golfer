@@ -80,6 +80,9 @@ const fr: Dict = {
   "pass.deadFunctions.label": "fonctions mortes",
   "pass.deadFunctions.title":
     "Supprime toute fonction jamais atteinte depuis main/mainImage (graphe d'appel). Désactivé automatiquement si aucun des deux n'est présent (ex. code Common seul).",
+  "pass.inlineSingleCall.label": "fonctions en ligne",
+  "pass.inlineSingleCall.title":
+    "Colle en ligne une fonction appelée une seule fois si son corps est un simple `return expr;` et que ses arguments sont de simples identifiants/nombres — seulement quand ça réduit vraiment la taille totale.",
   "pass.foldConstants.label": "constantes",
   "pass.foldConstants.title": "Replie les opérations *, / et % entre littéraux entiers purs (2*3 → 6).",
   "pass.constantVectors.label": "vecteurs constants",
@@ -221,6 +224,9 @@ const en: Dict = {
   "pass.deadFunctions.label": "dead functions",
   "pass.deadFunctions.title":
     "Removes any function never reached from main/mainImage (call graph). Automatically inert if neither is present (e.g. Common-only code).",
+  "pass.inlineSingleCall.label": "inline functions",
+  "pass.inlineSingleCall.title":
+    "Inlines a function called exactly once when its body is a plain `return expr;` and its arguments are simple identifiers/numbers — only when that actually shrinks the total size.",
   "pass.foldConstants.label": "constants",
   "pass.foldConstants.title": "Folds *, / and % operations between plain integer literals (2*3 → 6).",
   "pass.constantVectors.label": "constant vectors",

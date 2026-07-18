@@ -545,6 +545,7 @@ pub struct AggressiveOptions {
     pub strip_redundant_parens: bool,
     pub strip_duplicate_precision: bool,
     pub eliminate_dead_functions: bool,
+    pub inline_single_call_functions: bool,
 }
 
 impl AggressiveOptions {
@@ -563,6 +564,7 @@ impl AggressiveOptions {
             strip_redundant_parens: true,
             strip_duplicate_precision: true,
             eliminate_dead_functions: true,
+            inline_single_call_functions: true,
         }
     }
 
@@ -581,6 +583,7 @@ impl AggressiveOptions {
             strip_redundant_parens: false,
             strip_duplicate_precision: false,
             eliminate_dead_functions: false,
+            inline_single_call_functions: false,
         }
     }
 }
@@ -806,6 +809,9 @@ pub fn golf_with_protected_names(
         }
         if aggressive.eliminate_dead_functions {
             items = eliminate_dead_functions(items, &mut aggressive_stats);
+        }
+        if aggressive.inline_single_call_functions {
+            items = crate::inline::inline_single_call_functions(items, &mut aggressive_stats);
         }
         if aggressive.fold_constants {
             items = fold_constants(items, &mut aggressive_stats);
@@ -2243,36 +2249,41 @@ mod tests {
     }
 
     #[test]
-    fn keeps_a_function_called_from_mainimage() {
+    fn keeps_a_function_called_from_mainimage_that_isnt_a_single_call_site_inlining_candidate() {
+        // Two calls to `helper`, so ROADMAP.md Phase 3.2's single-call-
+        // site inlining must decline it -- this is now what actually
+        // distinguishes "kept because still reachable" from "kept
+        // because inlining doesn't apply", since a *single*-call-site
+        // reachable helper is now inlined instead (see the test below).
         let r = golf(
-            "float helper(float x){return x*2.0;}void mainImage(out vec4 fragColor,in vec2 fragCoord){fragColor=vec4(helper(1.0));}",
+            "float helper(float x){return x*2.0;}void mainImage(out vec4 fragColor,in vec2 fragCoord){fragColor=vec4(helper(1.0)+helper(2.0));}",
             true,
         );
         assert_eq!(
             r.code,
-            "float a(float b){return b*2.;}void mainImage(out vec4 b,in vec2 c){b=vec4(a(1.));}"
+            "float a(float b){return b*2.;}void mainImage(out vec4 b,in vec2 c){b=vec4(a(1.)+a(2.));}"
         );
         assert_eq!(r.stats.aggressive.dead_functions_removed, 0);
+        assert_eq!(r.stats.aggressive.functions_inlined, 0);
     }
 
     #[test]
-    fn keeps_a_function_reachable_only_transitively() {
+    fn inlines_and_then_folds_a_single_call_site_helper_reachable_only_transitively() {
         // mainImage calls `a`, which calls `b` -- `b` is never called
         // *directly* by an entry point, only reachable through the
-        // call graph, and must still survive. Also incidentally
-        // exercises ROADMAP.md Phase 1.3: `x` is a parameter name
-        // reused (as two separate declarations) in both `a` and `b`,
-        // now kept Local across both instead of forced Global, which
-        // frees up `a` for mainImage's own first param.
+        // call graph. Both are single-call-site pure-return-expression
+        // helpers (ROADMAP.md Phase 3.2), so both get inlined in turn
+        // by the fixpoint loop, and the resulting `1.*2.*2.` then folds
+        // all the way down to a constant by the existing float-folding
+        // pass (ROADMAP.md Phase 1.1) -- a real cross-pass cascade, not
+        // just inlining in isolation.
         let r = golf(
             "float a(float x){return b(x);}float b(float x){return x*2.0;}void mainImage(out vec4 fragColor,in vec2 fragCoord){fragColor=vec4(a(1.0));}",
             true,
         );
-        assert_eq!(
-            r.code,
-            "float b(float a){return c(a);}float c(float a){return a*2.;}void mainImage(out vec4 a,in vec2 d){a=vec4(b(1.));}"
-        );
+        assert_eq!(r.code, "void mainImage(out vec4 a,in vec2 d){a=vec4(2.);}");
         assert_eq!(r.stats.aggressive.dead_functions_removed, 0);
+        assert_eq!(r.stats.aggressive.functions_inlined, 2);
     }
 
     #[test]

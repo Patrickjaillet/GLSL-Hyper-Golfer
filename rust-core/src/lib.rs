@@ -18,6 +18,7 @@ mod aggressive;
 mod callgraph;
 mod expr;
 mod golfer;
+mod inline;
 mod lexer;
 mod vocab;
 
@@ -67,7 +68,7 @@ mod wasm_api {
     /// GolfResult` needs no changes at all.
     fn aggressive_stats_json(s: &AggressiveStats) -> String {
         format!(
-            "{{\"compoundAssignments\":{},\"declarationsMerged\":{},\"bracesRemoved\":{},\"constantsFolded\":{},\"deadLocalsRemoved\":{},\"deadStoresRemoved\":{},\"constantVectorsReduced\":{},\"trailingVoidReturnsRemoved\":{},\"incrementsDecrements\":{},\"ternariesFromIfElse\":{},\"redundantParensRemoved\":{},\"duplicatePrecisionRemoved\":{},\"deadFunctionsRemoved\":{}}}",
+            "{{\"compoundAssignments\":{},\"declarationsMerged\":{},\"bracesRemoved\":{},\"constantsFolded\":{},\"deadLocalsRemoved\":{},\"deadStoresRemoved\":{},\"constantVectorsReduced\":{},\"trailingVoidReturnsRemoved\":{},\"incrementsDecrements\":{},\"ternariesFromIfElse\":{},\"redundantParensRemoved\":{},\"duplicatePrecisionRemoved\":{},\"deadFunctionsRemoved\":{},\"functionsInlined\":{}}}",
             s.compound_assignments,
             s.declarations_merged,
             s.braces_removed,
@@ -81,6 +82,7 @@ mod wasm_api {
             s.redundant_parens_removed,
             s.duplicate_precision_removed,
             s.dead_functions_removed,
+            s.functions_inlined,
         )
     }
 
@@ -130,6 +132,7 @@ mod wasm_api {
         strip_redundant_parens: bool,
         strip_duplicate_precision: bool,
         eliminate_dead_functions: bool,
+        inline_single_call_functions: bool,
         protected_names: &str,
     ) -> String {
         let options = AggressiveOptions {
@@ -146,6 +149,7 @@ mod wasm_api {
             strip_redundant_parens,
             strip_duplicate_precision,
             eliminate_dead_functions,
+            inline_single_call_functions,
         };
         let names: Vec<String> = protected_names
             .split(',')
@@ -179,7 +183,7 @@ mod wasm_api {
             );
             assert_eq!(
                 golf_result_json(&result),
-                "{\"code\":\"void mainImage(out vec4 a,in vec2 c){float b=1.;a=vec4(b);}\",\"stats\":{\"inputChars\":84,\"outputChars\":59,\"reductionPct\":29.761904761904763,\"renamedCount\":3,\"numbersShortened\":1,\"aggressive\":{\"compoundAssignments\":0,\"declarationsMerged\":0,\"bracesRemoved\":0,\"constantsFolded\":0,\"deadLocalsRemoved\":0,\"deadStoresRemoved\":0,\"constantVectorsReduced\":0,\"trailingVoidReturnsRemoved\":0,\"incrementsDecrements\":0,\"ternariesFromIfElse\":0,\"redundantParensRemoved\":0,\"duplicatePrecisionRemoved\":0,\"deadFunctionsRemoved\":0}}}"
+                "{\"code\":\"void mainImage(out vec4 a,in vec2 c){float b=1.;a=vec4(b);}\",\"stats\":{\"inputChars\":84,\"outputChars\":59,\"reductionPct\":29.761904761904763,\"renamedCount\":3,\"numbersShortened\":1,\"aggressive\":{\"compoundAssignments\":0,\"declarationsMerged\":0,\"bracesRemoved\":0,\"constantsFolded\":0,\"deadLocalsRemoved\":0,\"deadStoresRemoved\":0,\"constantVectorsReduced\":0,\"trailingVoidReturnsRemoved\":0,\"incrementsDecrements\":0,\"ternariesFromIfElse\":0,\"redundantParensRemoved\":0,\"duplicatePrecisionRemoved\":0,\"deadFunctionsRemoved\":0,\"functionsInlined\":0}}}"
             );
         }
 

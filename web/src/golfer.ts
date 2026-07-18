@@ -724,6 +724,7 @@ export interface AggressiveStats {
   redundantParensRemoved: number;
   duplicatePrecisionRemoved: number;
   deadFunctionsRemoved: number;
+  functionsInlined: number;
 }
 
 function newAggressiveStats(): AggressiveStats {
@@ -741,6 +742,7 @@ function newAggressiveStats(): AggressiveStats {
     redundantParensRemoved: 0,
     duplicatePrecisionRemoved: 0,
     deadFunctionsRemoved: 0,
+    functionsInlined: 0,
   };
 }
 
@@ -1988,6 +1990,450 @@ function eliminateDeadFunctions(items: Token[], stats: AggressiveStats): Token[]
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Lightweight expression model (ROADMAP.md Phase 2, mirrors `expr.rs`) --
+// ported here specifically because single-call-site inlining below is
+// its first real consumer (a call's argument list and a function's
+// return expression both need real spans, not just "one opaque
+// primary term" the way `scanPrimary` stops at). See `expr.rs`'s module
+// docs for the full precedence table and the reasoning behind every
+// scope exclusion (no assignment/comma, no `++`/`--`) -- this is a
+// deliberately faithful port, not a reinterpretation.
+// ---------------------------------------------------------------------------
+
+type ExprNode =
+  | { type: "number"; text: string }
+  | { type: "ident"; text: string }
+  | { type: "unary"; op: string; operand: Expr }
+  | { type: "binary"; op: string; left: Expr; right: Expr }
+  | { type: "ternary"; cond: Expr; then: Expr; els: Expr }
+  | { type: "call"; name: string; args: Expr[] }
+  | { type: "index"; base: Expr; index: Expr }
+  | { type: "member"; base: Expr; field: string }
+  | { type: "paren"; inner: Expr };
+
+interface Expr {
+  node: ExprNode;
+  start: number;
+  end: number;
+}
+
+function parseExpr(items: Token[], start: number): Expr | null {
+  return parseTernary(items, start);
+}
+
+function parseTernary(items: Token[], start: number): Expr | null {
+  const cond = parseBinary(items, start, 0);
+  if (!cond) return null;
+  if (!isPunct(items[cond.end], "?")) return cond;
+  const thenBranch = parseTernary(items, cond.end + 1);
+  if (!thenBranch) return null;
+  if (!isPunct(items[thenBranch.end], ":")) return null;
+  const elseBranch = parseTernary(items, thenBranch.end + 1);
+  if (!elseBranch) return null;
+  return { node: { type: "ternary", cond, then: thenBranch, els: elseBranch }, start, end: elseBranch.end };
+}
+
+function twoCharPrec(op: string): number {
+  switch (op) {
+    case "||":
+      return 1;
+    case "&&":
+      return 2;
+    case "==":
+    case "!=":
+      return 6;
+    case "<=":
+    case ">=":
+      return 7;
+    case "<<":
+    case ">>":
+      return 8;
+    default:
+      return -1;
+  }
+}
+
+function singleCharPrec(c: string): number {
+  switch (c) {
+    case "|":
+      return 3;
+    case "^":
+      return 4;
+    case "&":
+      return 5;
+    case "<":
+    case ">":
+      return 7;
+    case "+":
+    case "-":
+      return 9;
+    case "*":
+    case "/":
+    case "%":
+      return 10;
+    default:
+      return -1;
+  }
+}
+
+/** Returns [op, indexPastOp, precedence], or null if no binary operator starts at `i`. */
+function binaryOpAt(items: Token[], i: number): [string, number, number] | null {
+  const cur = items[i];
+  if (!cur || cur.kind !== "punct") return null;
+  const c1 = cur.text;
+  const next = items[i + 1];
+  if (next && !next.spaceBefore && next.kind === "punct") {
+    const two = c1 + next.text;
+    const prec2 = twoCharPrec(two);
+    if (prec2 !== -1) return [two, i + 2, prec2];
+    if (two === "++" || two === "--") return null;
+  }
+  const prec1 = singleCharPrec(c1);
+  if (prec1 === -1) return null;
+  return [c1, i + 1, prec1];
+}
+
+function parseBinary(items: Token[], start: number, minPrec: number): Expr | null {
+  let lhs = parseUnary(items, start);
+  if (!lhs) return null;
+  for (;;) {
+    const opInfo = binaryOpAt(items, lhs.end);
+    if (!opInfo) break;
+    const [op, next, prec] = opInfo;
+    if (prec < minPrec) break;
+    const rhs = parseBinary(items, next, prec + 1);
+    if (!rhs) break;
+    lhs = { node: { type: "binary", op, left: lhs, right: rhs }, start, end: rhs.end };
+  }
+  return lhs;
+}
+
+function isPrefixIncDec(items: Token[], i: number): boolean {
+  const cur = items[i];
+  if (!cur || cur.kind !== "punct" || (cur.text !== "+" && cur.text !== "-")) return false;
+  const next = items[i + 1];
+  return !!next && !next.spaceBefore && next.kind === "punct" && next.text === cur.text;
+}
+
+function parseUnary(items: Token[], start: number): Expr | null {
+  if (isPrefixIncDec(items, start)) return null;
+  const cur = items[start];
+  if (cur && cur.kind === "punct" && UNARY_PREFIX.has(cur.text)) {
+    const operand = parseUnary(items, start + 1);
+    if (!operand) return null;
+    return { node: { type: "unary", op: cur.text, operand }, start, end: operand.end };
+  }
+  return parsePostfix(items, start);
+}
+
+function parsePostfix(items: Token[], start: number): Expr | null {
+  let e = parsePrimary(items, start);
+  if (!e) return null;
+  for (;;) {
+    if (isPunct(items[e.end], ".")) {
+      const nameTok: Token | undefined = items[e.end + 1];
+      if (!nameTok || nameTok.kind !== "ident") break;
+      e = { node: { type: "member", base: e, field: nameTok.text }, start, end: e.end + 2 };
+    } else if (isPunct(items[e.end], "[")) {
+      const close = skipBalanced(items, e.end, "[", "]");
+      if (close === -1) return null;
+      const indexExpr = parseExpr(items, e.end + 1);
+      if (!indexExpr || indexExpr.end !== close - 1) return null;
+      e = { node: { type: "index", base: e, index: indexExpr }, start, end: close };
+    } else if (isPunct(items[e.end], "(")) {
+      if (e.node.type !== "ident") break;
+      const close = skipBalanced(items, e.end, "(", ")");
+      if (close === -1) return null;
+      const args = parseArgList(items, e.end + 1, close - 1);
+      if (!args) return null;
+      e = { node: { type: "call", name: e.node.text, args }, start, end: close };
+    } else {
+      break;
+    }
+  }
+  return e;
+}
+
+function parseArgList(items: Token[], start: number, endBefore: number): Expr[] | null {
+  const args: Expr[] = [];
+  if (start === endBefore) return args;
+  let i = start;
+  for (;;) {
+    const e = parseExpr(items, i);
+    if (!e) return null;
+    i = e.end;
+    args.push(e);
+    if (isPunct(items[i], ",")) i++;
+    else break;
+  }
+  if (i !== endBefore) return null;
+  return args;
+}
+
+function parsePrimary(items: Token[], start: number): Expr | null {
+  const t = items[start];
+  if (!t) return null;
+  if (t.kind === "ident") return { node: { type: "ident", text: t.text }, start, end: start + 1 };
+  if (t.kind === "number") return { node: { type: "number", text: t.text }, start, end: start + 1 };
+  if (t.kind === "punct" && t.text === "(") {
+    const close = skipBalanced(items, start, "(", ")");
+    if (close === -1) return null;
+    const inner = parseExpr(items, start + 1);
+    if (!inner || inner.end !== close - 1) return null;
+    return { node: { type: "paren", inner }, start, end: close };
+  }
+  return null;
+}
+
+/** Primary/postfix-level node kinds -- safe to splice in without parens wherever a call expression (always primary/postfix itself) used to be. */
+function isPrimaryLevel(e: Expr): boolean {
+  return e.node.type === "number" || e.node.type === "ident" || e.node.type === "call" || e.node.type === "index" || e.node.type === "member" || e.node.type === "paren";
+}
+
+// ---------------------------------------------------------------------------
+// Single-call-site function inlining (ROADMAP.md Phase 3.2). Mirrors
+// `inline.rs` exactly -- see there for the full safety argument (why
+// only a single `return <expr>;` body qualifies, why arguments must be
+// bare operands, why `out`/`inout` params and self-recursion decline
+// the whole candidate, why the substituted expression is wrapped in
+// parens unless it's already primary/postfix level, and why net byte
+// cost is measured rather than assumed).
+// ---------------------------------------------------------------------------
+
+/** True for the argument shapes this pass will substitute -- a bare identifier/number, optionally unary-prefixed. */
+function isSafeArg(e: Expr): boolean {
+  if (e.node.type === "number" || e.node.type === "ident") return true;
+  if (e.node.type === "unary") return e.node.operand.node.type === "number" || e.node.operand.node.type === "ident";
+  return false;
+}
+
+interface InlineParam {
+  name: string;
+  disallowed: boolean;
+}
+
+function parseInlineParams(items: Token[], openParen: number): { params: InlineParam[]; closeParen: number } | null {
+  const closeParenCandidate = skipBalanced(items, openParen, "(", ")");
+  if (closeParenCandidate === -1) return null;
+  const closeParen = closeParenCandidate - 1;
+  const params: InlineParam[] = [];
+  let i = openParen + 1;
+  if (i === closeParen) return { params, closeParen };
+  for (;;) {
+    let disallowed = false;
+    for (;;) {
+      const t = items[i];
+      if (!t || t.kind !== "ident" || !KEYWORDS.has(t.text) || TYPE_KEYWORDS.has(t.text)) break;
+      if (t.text === "out" || t.text === "inout") disallowed = true;
+      i++;
+    }
+    const typeTok = items[i];
+    if (!typeTok || typeTok.kind !== "ident" || !TYPE_KEYWORDS.has(typeTok.text)) return null;
+    i++;
+    const nameTok = items[i];
+    if (!nameTok || nameTok.kind !== "ident") return null;
+    const name = nameTok.text;
+    i++;
+    if (isPunct(items[i], "[")) {
+      disallowed = true;
+      const close = skipBalanced(items, i, "[", "]");
+      if (close === -1) return null;
+      i = close;
+    }
+    params.push({ name, disallowed });
+    if (isPunct(items[i], ",")) {
+      i++;
+      continue;
+    }
+    if (isPunct(items[i], ")") && i === closeParen) break;
+    return null;
+  }
+  return { params, closeParen };
+}
+
+/** The function body must be exactly `{return <expr>;}` -- nothing before it, nothing after. */
+function parseSingleReturnBody(items: Token[], openBrace: number, bodyClose: number): Expr | null {
+  const returnTok = items[openBrace + 1];
+  if (!returnTok || returnTok.text !== "return") return null;
+  const expr = parseExpr(items, openBrace + 2);
+  if (!expr) return null;
+  if (!isPunct(items[expr.end], ";")) return null;
+  if (expr.end + 1 !== bodyClose) return null;
+  return expr;
+}
+
+interface InlineCallSite {
+  nameStart: number;
+  end: number;
+  args: Expr[];
+}
+
+/** Finds every genuine call site for `def.name` -- excludes its own signature and anywhere inside its own body (self-recursion). */
+function findInlineCallSites(items: Token[], def: FunctionDef): InlineCallSite[] | null {
+  const sites: InlineCallSite[] = [];
+  let i = 0;
+  while (i < items.length) {
+    const isOwnSignature = i === def.defStart + 1;
+    const isWithinOwnBody = i >= def.defStart && i <= def.bodyClose;
+    const t = items[i];
+    const matchesName = !!t && t.kind === "ident" && t.text === def.name;
+    if (matchesName && !isOwnSignature && !isWithinOwnBody && isPunct(items[i + 1], "(")) {
+      const close = skipBalanced(items, i + 1, "(", ")");
+      if (close === -1) return null;
+      const args = parseArgList(items, i + 2, close - 1);
+      if (!args) return null;
+      sites.push({ nameStart: i, end: close, args });
+    }
+    i++;
+  }
+  return sites;
+}
+
+function exprCharLen(items: Token[], start: number, end: number): number {
+  let n = 0;
+  for (let i = start; i < end; i++) n += items[i].text.length;
+  return n;
+}
+
+function tokensCharLen(tokens: Token[]): number {
+  return tokens.reduce((n, t) => n + t.text.length, 0);
+}
+
+function substituteInlineParams(items: Token[], exprStart: number, exprEnd: number, params: InlineParam[], args: Expr[]): Token[] {
+  const out: Token[] = [];
+  let i = exprStart;
+  while (i < exprEnd) {
+    const t = items[i];
+    if (t.kind === "ident") {
+      const pos = params.findIndex((p) => p.name === t.text);
+      if (pos !== -1) {
+        const arg = args[pos]!;
+        const argTokens = items.slice(arg.start, arg.end).map((tok, idx) => (idx === 0 ? { ...tok, spaceBefore: true } : tok));
+        out.push(...argTokens);
+        i++;
+        continue;
+      }
+    }
+    out.push(t);
+    i++;
+  }
+  return out;
+}
+
+interface InlineEdit {
+  start: number;
+  end: number;
+  replacement: Token[];
+}
+
+function rangesOverlap(a: [number, number], b: [number, number]): boolean {
+  return a[0] < b[1] && b[0] < a[1];
+}
+
+/**
+ * Inlines every function whose entire body is `return <expr>;`, is
+ * called from exactly one non-recursive call site with only bare-
+ * operand arguments, and whose substitution measurably shrinks the
+ * total byte count.
+ */
+function inlineSingleCallFunctions(items: Token[], stats: AggressiveStats): Token[] {
+  const defs = findFunctionDefinitions(items);
+  if (defs.length === 0) return items;
+
+  const nameCounts = new Map<string, number>();
+  for (const d of defs) nameCounts.set(d.name, (nameCounts.get(d.name) ?? 0) + 1);
+  const names = new Set(defs.map((d) => d.name));
+
+  // Call-count graph, generalized from eliminateDeadFunctions's
+  // reachability-only Set: excludes the definition's own name token
+  // (defStart+1) from its own body scan, same as `callgraph.rs` --
+  // otherwise every function would silently count as calling itself
+  // once just by declaring itself.
+  const callCounts = new Map<string, number>();
+  for (const def of defs) {
+    const ownNameIdx = def.defStart + 1;
+    for (let k = def.defStart; k <= def.bodyClose; k++) {
+      if (k === ownNameIdx) continue;
+      const t = items[k];
+      if (t.kind === "ident" && names.has(t.text)) callCounts.set(t.text, (callCounts.get(t.text) ?? 0) + 1);
+    }
+  }
+
+  const edits: InlineEdit[] = [];
+
+  for (const def of defs) {
+    if (def.name === "main" || def.name === "mainImage") continue;
+    if ((nameCounts.get(def.name) ?? 0) !== 1) continue;
+    if ((callCounts.get(def.name) ?? 0) !== 1) continue;
+
+    const sites = findInlineCallSites(items, def);
+    if (!sites || sites.length !== 1) continue;
+    const site = sites[0]!;
+
+    const openParen = def.defStart + 2;
+    const parsedParams = parseInlineParams(items, openParen);
+    if (!parsedParams) continue;
+    const { params, closeParen } = parsedParams;
+    if (params.some((p) => p.disallowed)) continue;
+    if (params.length !== site.args.length) continue;
+    if (!site.args.every((a) => isSafeArg(a))) continue;
+
+    const openBrace = closeParen + 1;
+    if (!isPunct(items[openBrace], "{")) continue;
+    const returnExpr = parseSingleReturnBody(items, openBrace, def.bodyClose);
+    if (!returnExpr) continue;
+
+    const declarationCost = exprCharLen(items, def.defStart, def.bodyClose + 1);
+    const callSiteCost = exprCharLen(items, site.nameStart, site.end);
+    const beforeCost = declarationCost + callSiteCost;
+
+    const substituted = substituteInlineParams(items, openBrace + 2, returnExpr.end, params, site.args);
+    const needsWrap = !isPrimaryLevel(returnExpr);
+    const afterCost = tokensCharLen(substituted) + (needsWrap ? 2 : 0);
+    if (afterCost >= beforeCost) continue;
+
+    const declRange: [number, number] = [def.defStart, def.bodyClose + 1];
+    const callRange: [number, number] = [site.nameStart, site.end];
+    if (edits.some((e) => rangesOverlap([e.start, e.end], declRange) || rangesOverlap([e.start, e.end], callRange))) continue;
+
+    if (substituted.length > 0) substituted[0] = { ...substituted[0]!, spaceBefore: true };
+    let replacement: Token[];
+    if (needsWrap) {
+      replacement = [
+        { kind: "punct", text: "(", original: "(", spaceBefore: true },
+        ...substituted,
+        { kind: "punct", text: ")", original: ")", spaceBefore: false },
+      ];
+    } else {
+      replacement = substituted;
+    }
+
+    stats.functionsInlined++;
+    edits.push({ start: declRange[0], end: declRange[1], replacement: [] });
+    edits.push({ start: callRange[0], end: callRange[1], replacement });
+  }
+
+  if (edits.length === 0) return items;
+  edits.sort((a, b) => a.start - b.start);
+
+  const out: Token[] = [];
+  let i = 0;
+  let editIdx = 0;
+  while (i < items.length) {
+    const edit = edits[editIdx];
+    if (edit && edit.start === i) {
+      out.push(...edit.replacement);
+      i = edit.end;
+      editIdx++;
+      continue;
+    }
+    out.push(items[i]);
+    i++;
+  }
+  return out;
+}
+
 /**
  * Merges adjacent declaration statements of the identical type keyword:
  * `float a=1.;float b=2.;` -> `float a=1.,b=2.;`. Only fires when the
@@ -2524,6 +2970,7 @@ export interface AggressiveOptions {
   stripRedundantParens: boolean;
   stripDuplicatePrecision: boolean;
   eliminateDeadFunctions: boolean;
+  inlineSingleCallFunctions: boolean;
 }
 
 export function allAggressiveOptions(on: boolean): AggressiveOptions {
@@ -2541,6 +2988,7 @@ export function allAggressiveOptions(on: boolean): AggressiveOptions {
     stripRedundantParens: on,
     stripDuplicatePrecision: on,
     eliminateDeadFunctions: on,
+    inlineSingleCallFunctions: on,
   };
 }
 
@@ -2692,6 +3140,7 @@ export function golf(
     if (options.eliminateDeadLocals) items = eliminateDeadLocals(items, aggressiveStats);
     if (options.eliminateDeadStores) items = eliminateDeadStores(items, aggressiveStats);
     if (options.eliminateDeadFunctions) items = eliminateDeadFunctions(items, aggressiveStats);
+    if (options.inlineSingleCallFunctions) items = inlineSingleCallFunctions(items, aggressiveStats);
     if (options.foldConstants) {
       items = foldConstants(items, aggressiveStats);
       // Same toggle, not a separate one — see the same comment in

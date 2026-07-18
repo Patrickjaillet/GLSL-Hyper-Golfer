@@ -61,7 +61,7 @@ fn print_stats(result: &GolfResult, aggressive: bool, to_stdout: bool) {
         result.stats.numbers_shortened,
         if aggressive {
             format!(
-                ", {} locaux morts supprimes, {} ecritures mortes supprimees, {} constantes repliees, {} vecteurs constants reduits, {} return finaux supprimes, {} affectations composees, {} increments/decrements, {} ternaires depuis if/else, {} declarations fusionnees, {} blocs d'accolades supprimes, {} parentheses redondantes supprimees, {} qualificateurs de precision dupliques supprimes, {} fonctions mortes supprimees",
+                ", {} locaux morts supprimes, {} ecritures mortes supprimees, {} constantes repliees, {} vecteurs constants reduits, {} return finaux supprimes, {} affectations composees, {} increments/decrements, {} ternaires depuis if/else, {} declarations fusionnees, {} blocs d'accolades supprimes, {} parentheses redondantes supprimees, {} qualificateurs de precision dupliques supprimes, {} fonctions mortes supprimees, {} fonctions en ligne",
                 result.stats.aggressive.dead_locals_removed,
                 result.stats.aggressive.dead_stores_removed,
                 result.stats.aggressive.constants_folded,
@@ -75,6 +75,7 @@ fn print_stats(result: &GolfResult, aggressive: bool, to_stdout: bool) {
                 result.stats.aggressive.redundant_parens_removed,
                 result.stats.aggressive.duplicate_precision_removed,
                 result.stats.aggressive.dead_functions_removed,
+                result.stats.aggressive.functions_inlined,
             )
         } else {
             String::new()

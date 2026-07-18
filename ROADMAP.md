@@ -905,13 +905,85 @@ réduisent effectivement la taille nette.
       d'expression de Phase 2), **calculer** le coût en octets de
       chaque stratégie (dupliquer / variable / macro), choisir la plus
       courte — jamais appliquer aveuglément.
-- [ ] (P1) **Inlining de fonctions à site d'appel unique.** Une
-      fonction appelée exactement une fois (via le graphe d'appel de
-      Phase 2) peut être collée en ligne à son site d'appel, économisant
-      la déclaration de fonction elle-même (nom, accolades, `return`)
-      contre le coût de substituer les paramètres. Mesurer le gain net
-      avant d'appliquer (une fonction avec plusieurs paramètres complexes
-      référencés plusieurs fois dans le corps peut perdre à l'inlining).
+- [x] (P1) **Inlining de fonctions à site d'appel unique.** Nouveau
+      module `inline.rs` — premier vrai consommateur des deux
+      fondations de Phase 2 : `CallGraph::total_calls_to` répond "cette
+      fonction est-elle appelée exactement une fois", `expr::parse_expr`/
+      `parse_arg_list` donnent les bornes exactes des arguments d'appel
+      et du corps de retour de la fonction, sans jamais avoir à
+      deviner où ils commencent/finissent.
+      **Portée volontairement étroite, comme chaque nouvelle passe de
+      ce moteur** : seule une fonction dont **tout le corps est un
+      unique `return <expr>;`** est candidate — aucune temporaire n'est
+      jamais introduite chez l'appelant (rien n'est déclaré, seulement
+      collé à la place de l'appel), donc aucun problème de capture de
+      nom à résoudre : le nom du paramètre ne survit jamais dans la
+      sortie, remplacé partout par les tokens de l'argument lui-même.
+      Seulement quand **chaque argument au site d'appel est un
+      opérande nu** (identifiant ou littéral numérique, signe unaire
+      optionnel — la même restriction que `parse_simple_write` fait
+      déjà confiance ailleurs dans ce moteur) l'inlining a lieu :
+      élimine d'un coup toute question d'ordre d'évaluation ou d'effet
+      de bord dupliqué, plutôt que d'essayer de la raisonner.
+      Paramètres `out`/`inout` ou avec déclarateur de tableau, corps
+      multi-instructions, et candidats auto-récursifs (le seul site
+      d'appel est à l'intérieur de son propre corps) refusent
+      entièrement le candidat.
+      **Sûreté de précédence** : le site d'appel était toujours un
+      terme de niveau primaire/postfixe (le plus liant de la
+      grammaire) dans l'expression qui l'entourait — substituer un
+      `Unary`/`Binary`/`Ternary` de retour *sans* parenthèses pourrait
+      changer silencieusement le groupement (`2*sq(x)` où `sq` renvoie
+      `a+1.` deviendrait `2*a+1.`, soit `(2*a)+1.`, pas `2*(a+1.)`).
+      Plutôt que prouver au cas par cas quand les parenthèses sont
+      superflues, ces trois formes sont **toujours** enveloppées ;
+      seuls `Number`/`Ident`/`Call`/`Index`/`Member`/`Paren` (déjà de
+      niveau primaire/postfixe) sont collés nus — vérifié explicitement
+      par un test dédié (`2.*sq2(x)` → `2.*(x+1.)`, jamais `2.*x+1.`).
+      **Gain net mesuré, pas supposé** (règle explicite de cette
+      Phase) : coût en octets de la déclaration + du site d'appel
+      comparé au coût de l'expression substituée (plus deux octets si
+      l'enveloppe de parenthèses est nécessaire) — l'inlining n'a lieu
+      que si c'est strictement plus court.
+      **Un vrai bug trouvé par les tests du nouveau compte d'appels
+      (Phase 2), pas anticipé** : réutilisé tel quel ici, il aurait
+      compté une fonction comme s'appelant elle-même une fois via son
+      propre nom en signature — corrigé en Phase 2 avant que cette
+      passe ne s'en serve, mais confirmé à nouveau ici par les tests
+      dédiés à l'auto-récursion.
+      **2 tests préexistants de `eliminate_dead_functions` mis à jour,
+      pas des régressions** : deux fonctions candidates à l'inlining
+      étaient auparavant seulement testées comme "correctement
+      conservées, pas supprimées à tort comme mortes" — désormais
+      elles sont en ligne puis, dans un cas, entièrement repliées par
+      constant-folding (Phase 1.1) dans la même boucle à point fixe :
+      un vrai enchaînement inlining→repliement, pas juste l'inlining en
+      isolation, vérifié en ajoutant l'assertion `functions_inlined`.
+      Miroir TypeScript complet dans le même changement — un port fidèle
+      du modèle d'expression (Phase 2) *et* de la passe d'inlining,
+      puisque c'est le premier vrai consommateur du modèle côté TS
+      aussi (pas de miroir prématuré comme documenté en Phase 2 pour
+      `expr.rs` seul) ; parité Rust/TS/wasm **50/50** (nouvelle
+      fixture `inline_single_call.glsl` incluse), `cargo test`/`cargo
+      clippy` (×2) propres — **9 nouveaux tests Rust** dans `inline.rs`
+      (inlining réussi, enveloppe de parenthèses nécessaire, refus si
+      appelée plusieurs fois, refus si argument non-opérande-nu, refus
+      `inout`, refus corps multi-instructions, refus auto-récursion
+      même isolément, inlining sans paramètre, argument d'un paramètre
+      inutilisé jamais perdu silencieusement) + case à cocher UI
+      ajoutée (`pass-inline-single-call`, groupe "Agressif" uniquement).
+      Budget de taille (Phase 0) : **4428 → 4610 octets** (nouvelle
+      fixture, pas une régression sur l'existant).
+      **Budget de bundle wasm gzippé désormais critique** : ~76.5 KiB
+      → **81259 octets (~79.4 KiB) sur un budget CI de 81920 octets
+      (80 KiB)** — marge restante **~661 octets (~0.8%)**. Toujours
+      sous le budget, mais tout prochain item de Phase 3 qui ajoute du
+      code (CSE et les macros générées en particulier, qui partagent
+      un calcul de coût similaire mais plus lourd) devra très
+      probablement soit relever ce budget, soit investir dans une
+      vraie réduction de taille avant de pouvoir atterrir — même
+      avertissement que celui déjà noté en Phase 1.3, désormais
+      beaucoup plus pressant.
 - [ ] (P1) **Extraction de swizzles répétés en temporaire, sous
       condition de gain net mesuré.** Même logique de calcul de coût
       que le CSE ci-dessus, cas spécifique aux accès `.xyz`/`.rgba`

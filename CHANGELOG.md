@@ -10,6 +10,16 @@ New entries are in English going forward (Development Conventions,
 `ROADMAP.md`).
 
 ### Added
+- **Engine roadmap Phase 3.2: single-call-site function inlining.** A
+  helper function called exactly once, whose whole body is a single
+  `return expr;` and whose arguments are simple identifiers/numbers,
+  is now inlined at its call site when that measurably shrinks the
+  total size — new "fonctions en ligne" / "inline functions" checkbox
+  in the Passes panel. wasm bundle is now within ~0.8% of the CI size
+  budget; flagged in `ROADMAP.md` for whoever picks up the next engine
+  item.
+
+### Added
 - **"About" panel** in the app header (ℹ button next to the language
   toggle): copyright, creator, email, website, repository, and
   license, in French/English like the rest of the UI.

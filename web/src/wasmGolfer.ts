@@ -58,6 +58,7 @@ export function wasmGolf(
     options.stripRedundantParens,
     options.stripDuplicatePrecision,
     options.eliminateDeadFunctions,
+    options.inlineSingleCallFunctions,
     protectedNames.join(","),
   );
   return JSON.parse(json) as GolfResult;
