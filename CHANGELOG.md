@@ -4,6 +4,28 @@ Historique des évolutions majeures du moteur et de l'app. Pas de
 numéros de version formels (pas de publication sur un registre) — les
 entrées sont datées et classées par ordre chronologique inverse.
 
+## 2026-07-18
+
+New entries are in English going forward (Development Conventions,
+`ROADMAP.md`).
+
+### Added
+- **"About" panel** in the app header (ℹ button next to the language
+  toggle): copyright, creator, email, website, repository, and
+  license, in French/English like the rest of the UI.
+- **README rewritten in English**, with a screenshot of the app
+  (`docs/screenshot.png`).
+- **`scripts/golf-progress-dashboard.mjs`** (ROADMAP.md Phase 0):
+  reports how much smaller the engine golfs the fixture corpus over
+  time, with a rigorous `--replay` mode that rebuilds each historical
+  engine version and runs it against today's fixtures. See
+  `PROGRESS.md`.
+- **Standard GitHub repository files**: `CONTRIBUTING.md`,
+  `.github/ISSUE_TEMPLATE/`, `.github/PULL_REQUEST_TEMPLATE.md`.
+
+### Changed
+- LICENSE copyright holder updated to SANDEFJORD DEVELOPMENT.
+
 ## 2026-07-13
 
 ### Ajouté

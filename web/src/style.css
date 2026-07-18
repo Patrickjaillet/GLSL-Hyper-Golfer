@@ -1017,6 +1017,33 @@ button.btn.small {
   color: var(--text-primary);
 }
 
+.about-popover h2 {
+  margin: 0 0 12px;
+  font-size: var(--fs-3);
+  color: var(--text-primary);
+}
+
+.about-fields {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 12px;
+  margin: 0;
+}
+
+.about-fields dt {
+  color: var(--text-dim);
+}
+
+.about-fields dd {
+  margin: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.about-fields a {
+  color: var(--signal-violet);
+}
+
 
 /* "Circuit trace with via" separator instead of a plain <hr> —
    ROADMAP.md Phase 2.3 — a thin trace broken by a small via pad at

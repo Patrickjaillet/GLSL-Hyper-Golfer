@@ -36,6 +36,7 @@ import iconFormat from "./assets/icons/icon-format.svg?raw";
 import iconCompare from "./assets/icons/icon-compare.svg?raw";
 import iconSoundOn from "./assets/icons/icon-sound-on.svg?raw";
 import iconSoundOff from "./assets/icons/icon-sound-off.svg?raw";
+import iconAbout from "./assets/icons/icon-about.svg?raw";
 import nightwireWordmark from "./assets/brand/nightwire-wordmark.svg?raw";
 import iconBadgeFits from "./assets/icons/icon-badge-fits.svg?raw";
 import iconBadgeTooBig from "./assets/icons/icon-badge-toobig.svg?raw";
@@ -241,6 +242,7 @@ app.innerHTML = `
       </div>
       <button class="lang-toggle" id="sound-toggle" type="button" aria-label=""></button>
       <button class="lang-toggle" id="lang-toggle" type="button" data-i18n-title="lang.toggle.title" data-i18n-aria-label="lang.toggle.title">${iconLang}<span id="lang-toggle-label"></span></button>
+      <button class="lang-toggle" id="about-btn" type="button" aria-haspopup="true" aria-expanded="false" data-i18n-title="about.btn.title" data-i18n-aria-label="about.btn.title">${iconAbout}</button>
       <div class="engine-pill" data-i18n-title="engine.tooltip" title="">
         <span class="dot cyan"></span><span data-i18n="engine.activeLabel">moteur actif : </span><b id="engine-label">…</b>
       </div>
@@ -404,6 +406,24 @@ app.innerHTML = `
       </label>
     </div>
 
+    <div class="passes-popover about-popover" id="about-popover" hidden>
+      <h2 data-i18n="about.heading">Hyper-Golfing Engine</h2>
+      <dl class="about-fields">
+        <dt data-i18n="about.copyright.label">Copyright</dt>
+        <dd>© 2026 SANDEFJORD DEVELOPMENT</dd>
+        <dt data-i18n="about.creator.label">Créateur</dt>
+        <dd>Patrick JAILLET</dd>
+        <dt data-i18n="about.email.label">Email</dt>
+        <dd><a href="mailto:contact.shaderstudio@gmail.com">contact.shaderstudio@gmail.com</a></dd>
+        <dt data-i18n="about.website.label">Site</dt>
+        <dd><a href="https://github.com/Patrickjaillet" target="_blank" rel="noopener">github.com/Patrickjaillet</a></dd>
+        <dt data-i18n="about.repository.label">Dépôt</dt>
+        <dd><a href="https://github.com/Patrickjaillet/GLSL-Hyper-Golfer" target="_blank" rel="noopener">GLSL-Hyper-Golfer</a></dd>
+        <dt data-i18n="about.license.label">Licence</dt>
+        <dd>MIT</dd>
+      </dl>
+    </div>
+
     <div class="system-log" id="system-log" aria-live="polite"></div>
   </div>
 `;
@@ -510,6 +530,8 @@ const protectedNamesInput = document.getElementById("protected-names-input") as 
 protectedNamesInput.value = restoredProtectedNames;
 const passesBtn = document.getElementById("passes-btn") as HTMLButtonElement;
 const passesPopover = document.getElementById("passes-popover") as HTMLElement;
+const aboutBtn = document.getElementById("about-btn") as HTMLButtonElement;
+const aboutPopover = document.getElementById("about-popover") as HTMLElement;
 const importBtn = document.getElementById("import-btn") as HTMLButtonElement;
 const exportBtn = document.getElementById("export-btn") as HTMLButtonElement;
 const langToggle = document.getElementById("lang-toggle") as HTMLButtonElement;
@@ -949,27 +971,39 @@ sidebarToggle.addEventListener("click", () => setSidebarCollapsed(!sidebar.class
 // opened, and closing it (Escape or an outside click) would strand
 // focus on whatever was last focused inside rather than sensibly
 // returning it to the button that opened it.
-function closePopover(): void {
-  const wasOpen = passesPopover.classList.contains("open");
-  passesPopover.classList.remove("open");
-  passesBtn.setAttribute("aria-expanded", "false");
-  if (wasOpen && passesPopover.contains(document.activeElement)) passesBtn.focus();
+function makeDrawer(btn: HTMLButtonElement, popover: HTMLElement) {
+  function close(): void {
+    const wasOpen = popover.classList.contains("open");
+    popover.classList.remove("open");
+    btn.setAttribute("aria-expanded", "false");
+    if (wasOpen && popover.contains(document.activeElement)) btn.focus();
+  }
+  function open(): void {
+    popover.hidden = false;
+    requestAnimationFrame(() => popover.classList.add("open"));
+    btn.setAttribute("aria-expanded", "true");
+    popover.querySelector<HTMLElement>("input, button, a, [tabindex]")?.focus();
+  }
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (!popover.classList.contains("open")) {
+      closePopover();
+      open();
+    } else close();
+  });
+  popover.addEventListener("click", (e) => e.stopPropagation());
+  popover.addEventListener("transitionend", () => {
+    if (!popover.classList.contains("open")) popover.hidden = true;
+  });
+  return { open, close };
 }
-function openPopover(): void {
-  passesPopover.hidden = false;
-  requestAnimationFrame(() => passesPopover.classList.add("open"));
-  passesBtn.setAttribute("aria-expanded", "true");
-  passesPopover.querySelector<HTMLElement>("input, button, [tabindex]")?.focus();
-}
-passesBtn.addEventListener("click", (e) => {
-  e.stopPropagation();
-  if (!passesPopover.classList.contains("open")) openPopover();
-  else closePopover();
-});
-passesPopover.addEventListener("click", (e) => e.stopPropagation());
-passesPopover.addEventListener("transitionend", () => {
-  if (!passesPopover.classList.contains("open")) passesPopover.hidden = true;
-});
+let closePopover: () => void = () => {};
+const passesDrawer = makeDrawer(passesBtn, passesPopover);
+const aboutDrawer = makeDrawer(aboutBtn, aboutPopover);
+closePopover = () => {
+  passesDrawer.close();
+  aboutDrawer.close();
+};
 document.addEventListener("click", closePopover);
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closePopover();

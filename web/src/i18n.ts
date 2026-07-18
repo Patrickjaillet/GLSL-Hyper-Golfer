@@ -144,6 +144,14 @@ const fr: Dict = {
   "log.importFailed": "échec de l'import Shadertoy",
   "warning.versionMismatch":
     "{pass} utilise {funcs}, des fonctions GLSL ES 1.00 absentes du contexte WebGL2/ES 3.00 utilisé ici — remplace-les par texture()/textureProj()/etc. avant de golfer.",
+  "about.btn.title": "À propos",
+  "about.heading": "Hyper-Golfing Engine",
+  "about.copyright.label": "Copyright",
+  "about.creator.label": "Créateur",
+  "about.email.label": "Email",
+  "about.website.label": "Site",
+  "about.repository.label": "Dépôt",
+  "about.license.label": "Licence",
 };
 
 const en: Dict = {
@@ -276,6 +284,14 @@ const en: Dict = {
   "log.importFailed": "Shadertoy import failed",
   "warning.versionMismatch":
     "{pass} uses {funcs}, GLSL ES 1.00 function(s) missing from the WebGL2/ES 3.00 context used here — replace with texture()/textureProj()/etc. before golfing.",
+  "about.btn.title": "About",
+  "about.heading": "Hyper-Golfing Engine",
+  "about.copyright.label": "Copyright",
+  "about.creator.label": "Creator",
+  "about.email.label": "Email",
+  "about.website.label": "Website",
+  "about.repository.label": "Repository",
+  "about.license.label": "License",
 };
 
 const DICTS: Record<Locale, Dict> = { fr, en };

@@ -1,65 +1,65 @@
 # GLSL Hyper-Golfer
 
-**Minifieur de shaders GLSL avec aperçu WebGL en direct — 100 % dans le
-navigateur, rien n'est envoyé nulle part.**
+**GLSL shader minifier with a live WebGL preview — 100% in the
+browser, nothing is ever sent anywhere.**
 
-Colle un shader façon Shadertoy (une fonction `mainImage`), obtiens une
-version minifiée en un clic, et vérifie tout de suite qu'elle rend
-exactement pareil grâce au viewport intégré.
+Paste a Shadertoy-style shader (a `mainImage` function), get a
+minified version in one click, and immediately verify it renders
+exactly the same via the built-in viewport.
 
-## 🎮 Essayer en ligne
+![GLSL Hyper-Golfer screenshot: golfed output, reduction stats, and the live WebGL viewport](docs/screenshot.png)
 
-👉 **[Ouvrir l'application](https://patrickjaillet.github.io/GLSL-Hyper-Golfer/)**
+## 🎮 Try it online
 
-Aucune installation nécessaire — ça tourne entièrement dans l'onglet du
-navigateur.
+👉 **[Open the app](https://patrickjaillet.github.io/GLSL-Hyper-Golfer/)**
 
-## ✨ Pourquoi
+No installation needed — it runs entirely in the browser tab.
 
-Sur Shadertoy, dans la demoscene, ou tout contexte où la taille du code
-compte (shaders "tweetables" en 280 caractères, par exemple), un shader
-lisible avec des noms de variables clairs prend beaucoup plus de place
-qu'il n'en a besoin pour fonctionner. L'Hyper-Golfer réduit cette taille
-automatiquement :
+## ✨ Why
 
-- **renomme** chaque variable/fonction/paramètre avec le nom le plus
-  court disponible,
-- **raccourcit** les nombres (`0.5` → `.5`, `2.0` → `2.`),
-- **retire** les espaces et retours à la ligne superflus,
-- et, si tu actives le mode agressif, va plus loin : accolades
-  superflues, déclarations fusionnées, code mort, constantes repliées...
+On Shadertoy, in the demoscene, or any context where code size matters
+(280-character "tweetable" shaders, for example), a readable shader
+with clear variable names takes up far more space than it needs to
+function. Hyper-Golfer shrinks that size automatically:
 
-Chaque transformation agressive est *justifiée* : le risque qu'elle
-introduit est expliqué, et tu peux activer/désactiver chaque passe
-individuellement plutôt que tout ou rien.
+- **renames** every variable/function/parameter to the shortest name
+  available,
+- **shortens** numbers (`0.5` → `.5`, `2.0` → `2.`),
+- **strips** superfluous whitespace and line breaks,
+- and, with aggressive mode enabled, goes further: redundant braces,
+  merged declarations, dead code, folded constants...
 
-## 🖥️ Comment ça marche
+Every aggressive transformation is *justified*: the risk it introduces
+is explained, and you can toggle each pass individually rather than
+all-or-nothing.
 
-L'interface tient sur un seul écran, sans scroll :
+## 🖥️ How it works
 
-- **Source** — colle ton shader ici. La case "Golf agressif" active les 6
-  passes optionnelles d'un coup ; le bouton "⚙ Passes" permet de n'en
-  garder que certaines.
-- **Golfé** — le résultat minifié, avec le taux de réduction et le détail
-  de ce qui a été transformé. La case "Version justifiée" ré-affiche le
-  code sur plusieurs lignes pour le lire plus facilement (uniquement à
-  l'affichage — ce qui est copié et ce qui tourne dans le viewport reste
-  toujours la version minifiée).
-- **Viewport** — rendu WebGL en temps réel du shader golfé, avec FPS et
-  résolution. La case "Comparer" affiche le shader source et le shader
-  golfé côte à côte, pour repérer une différence de rendu qui aurait pu
-  passer inaperçue.
+The interface fits on a single screen, no scrolling:
 
-Sous une fenêtre trop étroite, les 3 panneaux passent automatiquement en
-onglets. Les deux séparateurs entre panneaux se redimensionnent à la
-souris (ou au clavier, flèches ← →).
+- **Source** — paste your shader here. The "Aggressive golf" level
+  enables the optional passes all at once; the "Passes" button lets
+  you keep only some of them.
+- **Golfed** — the minified result, with the reduction rate and a
+  breakdown of what was transformed. The "Formatted view" checkbox
+  re-displays the code across multiple lines for easier reading
+  (display only — what gets copied and what runs in the viewport
+  stays the minified version).
+- **Viewport** — real-time WebGL render of the golfed shader, with FPS
+  and resolution. The "Compare" checkbox renders the source and golfed
+  shaders side by side, to catch a rendering difference that might
+  otherwise go unnoticed.
 
-## 🔒 Vie privée
+Under a narrow window, the 3 panels automatically switch to tabs. Both
+dividers between panels are resizable with the mouse (or the keyboard,
+← → arrows).
 
-Le moteur de minification tourne entièrement côté client (compilé en
-WebAssembly) — ton shader ne quitte jamais ton navigateur.
+## 🔒 Privacy
 
-## 🖥️ Utilisation en local
+The minification engine runs entirely client-side (compiled to
+WebAssembly) — your shader never leaves your browser.
+
+## 🖥️ Running locally
 
 ```bash
 git clone https://github.com/Patrickjaillet/GLSL-Hyper-Golfer.git
@@ -68,6 +68,17 @@ npm install
 npm run dev
 ```
 
-## 📄 Licence
+## 📄 License
 
-[MIT](LICENSE) — libre de réutilisation, modification et redistribution.
+[MIT](LICENSE) — free to reuse, modify, and redistribute.
+
+## ℹ️ About
+
+**Hyper-Golfing Engine**
+Copyright © 2026 SANDEFJORD DEVELOPMENT — All rights reserved
+Creator: Patrick JAILLET
+Email: contact.shaderstudio@gmail.com
+Website: https://github.com/Patrickjaillet
+Repository: https://github.com/Patrickjaillet/GLSL-Hyper-Golfer
+
+Also available in-app, in the "ℹ" panel next to the language toggle.
