@@ -22,5 +22,9 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
     float b = 2.0;
     a = 3.0;
 
-    fragColor = vec4(x, y + z, w, a + b);
+    float p = 1.0;
+    float q = p;
+    p = 3.0;
+
+    fragColor = vec4(x, y + z, w, a + b + q + p);
 }

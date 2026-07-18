@@ -1,5 +1,5 @@
 {
-  "totalBytes": 4407,
+  "totalBytes": 4428,
   "perFixture": {
     "already_broken.glsl": 68,
     "block_scope_renaming.glsl": 248,
@@ -10,7 +10,7 @@
     "constant_vectors.glsl": 189,
     "dead_functions.glsl": 148,
     "dead_locals.glsl": 115,
-    "dead_stores.glsl": 161,
+    "dead_stores.glsl": 182,
     "declaration_heuristic.glsl": 117,
     "declarations.glsl": 15,
     "define_safety.glsl": 96,

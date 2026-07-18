@@ -1872,13 +1872,26 @@ mod tests {
     }
 
     #[test]
-    fn does_not_catch_dead_stores_separated_by_another_statement() {
-        // Documented scope limit: only *directly adjacent* pairs are
-        // considered. `x=1.0;y=2.0;x=3.0;` has a dead `x=1.0;` too, but
-        // proving that safely would need real liveness analysis across
-        // the intervening `y=2.0;` — declined rather than risk it.
+    fn catches_a_dead_store_separated_by_an_unrelated_statement() {
+        // ROADMAP.md Phase 2 "liveness analysis": generalizes dead-store
+        // elimination from "only the immediately next statement" to the
+        // whole straight-line run. `x=1.0;y=2.0;x=3.0;` has a dead
+        // `x=1.0;` even with `y=2.0;` in between, since that statement
+        // doesn't read `x` — proven by scanning the whole chain of
+        // simple writes for the next same-name write, not just the one
+        // right after it.
         let r = golf("void f(){x=1.0;y=2.0;x=3.0;foo(x,y);}", true);
-        assert_eq!(r.code, "void a(){x=1.;y=2.;x=3.;foo(x,y);}");
+        assert_eq!(r.code, "void a(){y=2.;x=3.;foo(x,y);}");
+        assert_eq!(r.stats.aggressive.dead_stores_removed, 1);
+    }
+
+    #[test]
+    fn still_declines_when_an_intervening_write_reads_the_tracked_name() {
+        // `y=x;` between the two `x` writes really does read `x`'s
+        // value 1.0 before it's overwritten — the liveness scan must
+        // still catch that and refuse to drop the first write.
+        let r = golf("void f(){x=1.0;y=x;x=3.0;foo(x,y);}", true);
+        assert_eq!(r.code, "void a(){x=1.;y=x;x=3.;foo(x,y);}");
         assert_eq!(r.stats.aggressive.dead_stores_removed, 0);
     }
 

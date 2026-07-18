@@ -35,7 +35,7 @@ pub struct AggressiveStats {
     pub dead_functions_removed: usize,
 }
 
-fn is_unary_prefix(c: char) -> bool {
+pub(crate) fn is_unary_prefix(c: char) -> bool {
     matches!(c, '-' | '+' | '!' | '~')
 }
 
@@ -229,11 +229,59 @@ fn parse_simple_write(items: &[Item], start: usize) -> Option<SimpleWrite> {
     })
 }
 
-/// Drops a simple write when the *very next* statement is a plain
-/// (non-declaring) simple write to the same name that doesn't itself
-/// read that name — see the module docs above. A declaration's write is
-/// reduced to a bare `<type> <ident>;` rather than dropped outright
-/// (its declaration must survive; only the wasted initial value dies).
+/// Greedily parses a maximal run of consecutive simple-write statements
+/// starting at `start` — a straight-line "basic block" of the only
+/// statement shape this analysis understands. Stops (without failing)
+/// at the first statement that isn't itself a simple write: a branch,
+/// loop, function-call statement, compound assignment, or anything
+/// else. That boundary is exactly what keeps this a liveness analysis
+/// over straight-line code only, per the module docs above — nothing
+/// on the far side of it is ever reasoned about.
+fn parse_write_chain(items: &[Item], start: usize) -> Vec<SimpleWrite> {
+    let mut chain = Vec::new();
+    let mut i = start;
+    while let Some(w) = parse_simple_write(items, i) {
+        i = w.end;
+        chain.push(w);
+    }
+    chain
+}
+
+/// A write at index `i` in the chain is dead when some *later* write in
+/// the same straight-line run targets the same name, and nothing
+/// between the two reads it first. This is the intra-block liveness
+/// analysis ROADMAP.md Phase 2 asks for, generalizing the old
+/// "only the immediately next statement" check to the whole run: the
+/// value written at `i` is live only if it can still be observed
+/// before being overwritten, and within a straight-line block that's
+/// answerable exactly by scanning forward for the next same-name write
+/// and checking every write in between for a read (`rhs_ident`) of it
+/// — including the superseding write itself, since `x=x;` reads the
+/// very value it's about to overwrite.
+fn find_dead_writes_in_chain(chain: &[SimpleWrite]) -> HashSet<usize> {
+    let mut dead = HashSet::new();
+    for i in 0..chain.len() {
+        for j in (i + 1)..chain.len() {
+            if chain[j].name == chain[i].name {
+                let read_before_overwrite = chain[(i + 1)..=j]
+                    .iter()
+                    .any(|w| w.rhs_ident.as_deref() == Some(chain[i].name.as_str()));
+                if !read_before_overwrite {
+                    dead.insert(i);
+                }
+                break; // `j` is the *nearest* same-name write; anything further is a separate question for `i`'s own dead-check, not this one.
+            }
+        }
+    }
+    dead
+}
+
+/// Drops every dead write found by `find_dead_writes_in_chain` across
+/// the whole straight-line run at once, rather than only ever looking
+/// one statement ahead — see the module docs above. A declaration's
+/// write is reduced to a bare `<type> <ident>;` rather than dropped
+/// outright (its declaration must survive; only the wasted initial
+/// value dies); a later, non-declaring dead write is dropped entirely.
 pub fn eliminate_dead_stores(items: Vec<Item>, stats: &mut AggressiveStats) -> Vec<Item> {
     let mut out: Vec<Item> = Vec::with_capacity(items.len());
     let mut i = 0;
@@ -244,24 +292,27 @@ pub fn eliminate_dead_stores(items: Vec<Item>, stats: &mut AggressiveStats) -> V
     let mut depth = 0i32;
     while i < items.len() {
         if depth == 0 {
-            if let Some(write) = parse_simple_write(&items, i) {
-                if let Some(next) = parse_simple_write(&items, write.end) {
-                    let self_referencing = next.rhs_ident.as_deref() == Some(write.name.as_str());
-                    if !next.is_decl && next.name == write.name && !self_referencing {
+            let chain = parse_write_chain(&items, i);
+            let dead = find_dead_writes_in_chain(&chain);
+            if !dead.is_empty() {
+                for (idx, w) in chain.iter().enumerate() {
+                    if dead.contains(&idx) {
                         stats.dead_stores_removed += 1;
-                        if write.is_decl {
-                            out.push(items[write.start].clone());
-                            out.push(items[write.start + 1].clone());
+                        if w.is_decl {
+                            out.push(items[w.start].clone());
+                            out.push(items[w.start + 1].clone());
                             out.push(Item {
                                 tok: Tok::Punct(';'),
                                 text: ";".to_string(),
                                 space_before: false,
                             });
                         }
-                        i = write.end;
-                        continue;
+                    } else {
+                        out.extend(items[w.start..w.end].iter().cloned());
                     }
                 }
+                i = chain.last().map(|w| w.end).unwrap_or(i);
+                continue;
             }
         }
         match items[i].tok {
@@ -281,7 +332,7 @@ pub fn eliminate_dead_stores(items: Vec<Item>, stats: &mut AggressiveStats) -> V
 /// separate precondition check), and returns the index just past the
 /// matching close, or `None` if the brackets never close (malformed
 /// input — leave it alone rather than guess).
-fn skip_balanced(items: &[Item], open: usize, open_c: char, close_c: char) -> Option<usize> {
+pub(crate) fn skip_balanced(items: &[Item], open: usize, open_c: char, close_c: char) -> Option<usize> {
     match items.get(open).map(|it| &it.tok) {
         Some(Tok::Punct(c)) if *c == open_c => {}
         _ => return None,
@@ -1859,91 +1910,15 @@ pub fn strip_redundant_parens(items: Vec<Item>, stats: &mut AggressiveStats) -> 
 // an entry point isn't.
 // ---------------------------------------------------------------------
 
-/// Scans backward from a `)` at `close_paren` for its matching `(`, or
-/// `None` if unbalanced — the mirror image of `skip_balanced`, needed
-/// here because a function's parameter list has to be found by
-/// walking left from its own body's opening brace.
-fn matching_open_paren(items: &[Item], close_paren: usize) -> Option<usize> {
-    if !matches!(items.get(close_paren).map(|it| &it.tok), Some(Tok::Punct(')'))) {
-        return None;
-    }
-    let mut depth = 0i32;
-    let mut i = close_paren;
-    loop {
-        match items.get(i).map(|it| &it.tok) {
-            Some(Tok::Punct(')')) => depth += 1,
-            Some(Tok::Punct('(')) => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(i);
-                }
-            }
-            None => return None,
-            _ => {}
-        }
-        if i == 0 {
-            return None;
-        }
-        i -= 1;
-    }
-}
-
-/// One `<type> <name>(...){...}` found at true top level: `def_start`
-/// is the return-type token's index, `body_close` is the closing `}`.
-/// Deleting `items[def_start..=body_close]` removes the whole
-/// definition, nothing more and nothing less.
-struct FunctionDef {
-    name: String,
-    def_start: usize,
-    body_close: usize,
-}
-
-/// Finds every top-level function definition, in source order. Jumps
-/// straight over every top-level `{...}` span it finds (function or
-/// not) via `skip_balanced`, so nothing nested inside one is ever
-/// independently misidentified as its own top-level definition —
-/// mirrors `golfer.rs::top_level_brace_ranges`'s same jump-the-whole-
-/// span approach.
-fn find_function_definitions(items: &[Item]) -> Vec<FunctionDef> {
-    let mut defs = Vec::new();
-    let mut i = 0;
-    while i < items.len() {
-        if matches!(items[i].tok, Tok::Punct('{')) {
-            if let Some(close) = skip_balanced(items, i, '{', '}') {
-                let body_close = close - 1;
-                if i >= 1 {
-                    if let Some(open_paren) = matching_open_paren(items, i - 1) {
-                        if open_paren >= 2 {
-                            let name_idx = open_paren - 1;
-                            let type_idx = open_paren - 2;
-                            if let (Tok::Ident(name), Tok::Ident(_)) =
-                                (&items[name_idx].tok, &items[type_idx].tok)
-                            {
-                                defs.push(FunctionDef {
-                                    name: name.clone(),
-                                    def_start: type_idx,
-                                    body_close,
-                                });
-                            }
-                        }
-                    }
-                }
-                i = close;
-                continue;
-            }
-        }
-        i += 1;
-    }
-    defs
-}
-
 /// Removes every function definition unreachable from `main`/
 /// `mainImage` — see the section comment above for the full safety
 /// argument (call-graph reachability, why overloads are tracked by
 /// name together, why an unrecognized entry point means declining the
-/// whole pass rather than guessing).
+/// whole pass rather than guessing). The call graph itself
+/// (`find_function_definitions`/`CallGraph`) is reusable infrastructure
+/// extracted to its own module (ROADMAP.md Phase 2) — see there.
 pub fn eliminate_dead_functions(items: Vec<Item>, stats: &mut AggressiveStats) -> Vec<Item> {
-    let defs = find_function_definitions(&items);
+    let defs = crate::callgraph::find_function_definitions(&items);
     if defs.is_empty() {
         return items;
     }
@@ -1958,32 +1933,8 @@ pub fn eliminate_dead_functions(items: Vec<Item>, stats: &mut AggressiveStats) -
         return items;
     }
 
-    let mut calls: HashMap<String, HashSet<String>> = HashMap::new();
-    for def in &defs {
-        let entry = calls.entry(def.name.clone()).or_default();
-        for item in &items[def.def_start..=def.body_close] {
-            if let Tok::Ident(callee) = &item.tok {
-                if names.contains(callee) {
-                    entry.insert(callee.clone());
-                }
-            }
-        }
-    }
-
-    let mut reachable: HashSet<String> = HashSet::new();
-    let mut queue: Vec<String> = roots;
-    while let Some(name) = queue.pop() {
-        if !reachable.insert(name.clone()) {
-            continue;
-        }
-        if let Some(callees) = calls.get(&name) {
-            for callee in callees {
-                if !reachable.contains(callee) {
-                    queue.push(callee.clone());
-                }
-            }
-        }
-    }
+    let graph = crate::callgraph::CallGraph::build(&items, &defs, &names);
+    let reachable = graph.reachable_from(&roots);
 
     let mut dead_ranges: Vec<(usize, usize)> = defs
         .iter()

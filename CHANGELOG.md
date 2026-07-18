@@ -27,6 +27,14 @@ New entries are in English going forward (Development Conventions,
   matching GitHub release. Runs automatically on every tag push, or
   manually (`workflow_dispatch`, with a tag input) to backfill an
   existing release like `1.0.0`.
+- **Engine roadmap Phase 2** (architectural foundation, see
+  `ROADMAP.md`): a lightweight expression parser (`rust-core/src/expr.rs`,
+  not wired into any pass yet — infrastructure for Phase 3) and a
+  reusable function call graph (`rust-core/src/callgraph.rs`). More
+  directly user-visible: dead-store elimination now catches a dead
+  write separated from the write that supersedes it by an unrelated
+  statement (`x=1.0;y=2.0;x=3.0;` now golfs `y=2.0;x=3.0;`), not just
+  strictly adjacent pairs as before.
 
 ### Changed
 - LICENSE copyright holder updated to SANDEFJORD DEVELOPMENT.

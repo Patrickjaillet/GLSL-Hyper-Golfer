@@ -742,30 +742,148 @@ liste de tokens. Ne pas tenter ces passes en peephole pur — le risque de
 bug de correction monte fort dès qu'on sort du motif "deux tokens
 adjacents".
 
-- [ ] (P0) **Modèle d'expression léger.** Pas un vrai compilateur GLSL
-      complet (grammaire entière, système de types) — juste assez pour
-      distinguer une expression de ses sous-termes avec leurs bornes
-      exactes dans le flux de tokens (`scan_primary` existe déjà et est
-      le bon point de départ, mais s'arrête à un seul terme ; il faut
-      un vrai arbre récursif d'opérateurs binaires avec précédence).
-      Réutilisable par toutes les passes de la Phase 3, pas construit
-      une fois par passe.
-- [ ] (P0) **Analyse de liveness intra-fonction.** Pour chaque variable
-      locale : à quels points du corps de fonction est-elle encore
-      "vivante" (sa valeur actuelle sera-t-elle relue avant d'être
-      réécrite ou avant la fin de la fonction) — généralisation de ce
-      que `eliminate_dead_stores`/`eliminate_dead_locals` font déjà en
-      version "paire adjacente seulement". Cette analyse, une fois
-      construite, **remplace et généralise directement** ces deux
-      passes existantes (Phase 1 les gardait comme peephole exprès,
-      elles peuvent migrer ici une fois l'infra prête) tout en
-      débloquant l'élimination de code mort **non adjacent** listée
-      dans l'ancienne roadmap comme limite connue.
-- [ ] (P1) **Graphe d'appel de fonctions** (qui appelle qui, combien de
-      fois chaque fonction est appelée) — prérequis direct de
-      l'inlining à site unique (Phase 3.2) et de l'élimination de
-      fonctions mortes (Phase 1.2, qui peut en réalité se construire
-      ici plutôt qu'en Phase 1 si cette fondation arrive en premier).
+- [x] (P0) **Modèle d'expression léger.** Nouveau module `expr.rs`
+      (aucun équivalent existant à remplacer) : un vrai analyseur
+      descendant récursif à précédence d'opérateurs, produisant un
+      arbre (`Expr`/`ExprKind` : `Number`, `Ident`, `Unary`, `Binary`,
+      `Ternary`, `Call`, `Index`, `Member`, `Paren`) avec les bornes
+      exactes (`start`/`end`, indices dans le flux de tokens) de chaque
+      nœud — construit sur les mêmes primitives que le peephole existant
+      (`scan_primary`, `skip_balanced`, désormais `pub(crate)` pour être
+      partagées). Précédence C/GLSL standard via *precedence climbing*
+      (une seule fonction générique plutôt que 12 fonctions récursives
+      empilées) ; opérateurs deux caractères (`==`,`&&`,`<<`,...)
+      reconnus par adjacence sans espace, même convention que
+      `space_before` du lexer pour distinguer un vrai `--` de deux `-`
+      unaires séparés par un espace.
+      **Périmètre volontairement restreint, documenté plutôt que
+      découvert plus tard** : ni affectation, ni opérateur virgule
+      (jamais nécessaires pour les sous-expressions valeur que cible la
+      Phase 3), et surtout **jamais `++`/`--`** — un opérateur à effet de
+      bord ne peut jamais être traité comme un sous-terme pur
+      dupliquable/réordonnable par une future passe de CSE sans casser
+      le programme ; les exclure ici est le choix de sûreté correct, pas
+      un raccourci.
+      **Deux vrais bugs trouvés par les tests, pas anticipés à l'écriture** :
+      (1) un opérateur en position finale sans opérande valide derrière
+      (`a+`) faisait échouer l'analyse de **toute** l'expression via `?`
+      au lieu de simplement s'arrêter en gardant `a` comme plus longue
+      expression valide trouvée — corrigé en un `break` au lieu d'une
+      propagation d'échec ; (2) un `++`/`--` **postfixe** juste après un
+      terme complet (`x++ + 1`) aurait fait consommer un seul des deux
+      `+` comme opérateur binaire en laissant l'autre en suspens,
+      corrompant silencieusement la frontière `.end` — corrigé en
+      refusant explicitement cette paire adjacente plutôt que de
+      retomber sur la reconnaissance à un seul caractère.
+      **Pas de miroir TypeScript pour l'instant, décision délibérée** :
+      ce module n'a aucun appelant (la Phase 3 sera son premier
+      consommateur) — écrire un miroir TS maintenant, sans que rien
+      n'exerce les deux implémentations l'une contre l'autre, reproduirait
+      exactement le risque de divergence silencieuse trouvé et corrigé en
+      Phase 1.4 (`item.text` vs `item.original`). Le miroir TS arrivera
+      avec la première passe de Phase 3 qui consomme réellement ce
+      modèle, en même temps que le changement de comportement observable
+      qu'elle introduit — jamais avant.
+      19 tests Rust dédiés (précédence multiplicative/additive,
+      associativité gauche, opérateurs deux caractères, associativité
+      droite du ternaire, préservation des parenthèses comme nœud,
+      chaînes membre/index/appel, appels imbriqués, préfixes unaires
+      chaînés, `- -x` avec espace ≠ `--x`, refus explicite de `--x`,
+      arrêt propre avant `x++`, parenthèse non fermée refusée,
+      opérateur final refusé proprement, égalité structurelle
+      ignorant spans/parenthèses pour le futur CSE, robustesse sur
+      entrée vide/aléatoire). `cargo test`/`cargo clippy` (×2) propres.
+      Budget de taille (Phase 0) : **aucun changement** (module non
+      branché dans le pipeline).
+- [x] (P0) **Analyse de liveness intra-fonction.** `eliminate_dead_stores`
+      généralisée depuis "seulement la paire adjacente" vers un vrai
+      calcul de liveness sur toute la portion de code linéaire (bloc
+      droit, sans branchement) : `parse_write_chain` regroupe désormais
+      une chaîne maximale d'écritures simples consécutives, puis
+      `find_dead_writes_in_chain` cherche pour chaque écriture, dans
+      *toute* la chaîne (pas seulement l'écriture suivante), la
+      prochaine écriture vers le même nom et vérifie qu'aucune écriture
+      entre les deux (RHS bornée à un identifiant nu, `rhs_ident`) ne
+      relit la valeur — exactement la généralisation "code mort non
+      adjacent" que l'ancienne roadmap listait comme limite connue.
+      Reste strictement dans le régime "preuve, pas heuristique" : tout
+      ce qui n'est pas une écriture simple reconnue (branchement,
+      boucle, appel, affectation composée) arrête la chaîne net, rien
+      au-delà n'est jamais analysé — pas de fusion de branches, pas de
+      vraie analyse de flux de contrôle façon CFG, délibérément, dans
+      le même esprit que le reste du moteur.
+      Exemple concret débloqué : `x=1.0;y=2.0;x=3.0;` — auparavant non
+      détecté (le `y=2.0;` intercalé empêchait la paire adjacente de
+      matcher, quel que soit le nombre d'itérations du point fixe) —
+      golfe désormais en `y=2.;x=3.;`, le premier `x=1.0;` correctement
+      identifié comme mort.
+      **`eliminate_dead_locals` non touchée** : elle raisonne déjà sur
+      la fréquence globale du nom dans tout le fichier (pas sur un
+      point de programme précis), donc déjà maximalement générale pour
+      ce qu'elle fait — une vraie généralisation par liveness n'aurait
+      rien à y ajouter.
+      2 tests Rust mis à jour (pas des régressions : un ancien test
+      documentait explicitement l'ancienne limite comme scope
+      *intentionnel* — devenu obsolète par construction — remplacé par
+      un test positif de la nouvelle capacité, plus un test négatif
+      dédié confirmant qu'une vraie lecture intercalée (`y=x;`) bloque
+      toujours correctement la suppression). Miroir TypeScript
+      (`parseWriteChain`/`findDeadWritesInChain`/`eliminateDeadStores`)
+      réécrit en parallèle dans le même changement — parité Rust/TS
+      48/48, `cargo test`/`cargo clippy` (×2) propres. Fixture
+      `dead_stores.glsl` étendue avec le cas non-adjacent ci-dessus *et*
+      son pendant refusé (`p=1.0;q=p;p=3.0;` — `q=p;` lit réellement `p`,
+      la suppression doit rester refusée), budget de taille (Phase 0) :
+      **4407 → 4428 octets** (nouvelles lignes de fixture, pas une
+      régression sur l'existant — 4 suppressions d'écritures mortes sur
+      cette seule fixture contre 3 avant cet item). Suite web complète
+      vérifiée (`tsc`, `eslint`, `vite build`, `e2e`) — verte, wasm
+      reconstruit et reparité 48/48.
+- [x] (P1) **Graphe d'appel de fonctions.** Nouveau module `callgraph.rs` :
+      extrait et généralise la logique de graphe d'appel que
+      `eliminate_dead_functions` (Phase 1.2) construisait en interne
+      pour son seul besoin (un `HashSet` de callees par fonction, juste
+      assez pour la question "atteignable oui/non"). `CallGraph`
+      généralise vers un compte d'appels par callee (`HashMap` au lieu
+      de `HashSet`) — la question "combien de fois", prérequis direct
+      de l'inlining à site d'appel unique (Phase 3.2), que la seule
+      atteignabilité ne peut pas répondre. `find_function_definitions`/
+      `FunctionDef`/`matching_open_paren` déplacées avec lui (même
+      module, cohérence : on ne peut pas construire un graphe d'appel
+      sans d'abord trouver les fonctions). `eliminate_dead_functions`
+      refactorée pour consommer `CallGraph::reachable_from` au lieu de
+      sa propre copie du parcours d'atteignabilité — **refactor à
+      comportement strictement identique**, vérifié par le budget de
+      taille (Phase 0, aucun changement) et la parité 48/48.
+      **Un vrai bug trouvé par les tests du nouveau compte d'appels, pas
+      par relecture** : le nom de la fonction dans sa propre signature
+      (`void helper(){...}`) tombait dans la même plage de tokens
+      scannée pour trouver ses appelants, donc chaque fonction se
+      comptait implicitement comme s'appelant elle-même une fois — sans
+      effet sur la seule atteignabilité (un self-loop ne change rien à
+      un ensemble déjà atteint), mais faussant silencieusement de +1
+      *tout* futur usage de `total_calls_to` (Phase 3.2 aurait vu
+      "appelée 2 fois" pour une fonction réellement appelée une seule
+      fois, bloquant à tort l'inlining). Corrigé en excluant
+      explicitement l'indice du nom de fonction (`def_start+1`) du
+      scan de son propre corps.
+      **`total_calls_to` n'a pas encore d'appelant** (Phase 3.2 sera le
+      premier) — même raisonnement que le modèle d'expression ci-dessus
+      pour ne pas écrire un miroir TS prématuré ; `reachable_from`, lui,
+      a déjà un appelant réel (`eliminate_dead_functions`) donc est
+      déjà exercé par la suite de tests existante à travers lui.
+      4 nouveaux tests Rust dédiés au module (compte de multiples
+      appels vers la même fonction, somme à travers plusieurs appelants
+      distincts, atteignabilité transitive via `reachable_from`, une
+      fonction jamais appelée a bien un compte total de zéro). `cargo
+      test`/`cargo clippy` (×2) propres, budget de taille (Phase 0) :
+      **aucun changement** (refactor pur). Suite web complète vérifiée
+      — verte, wasm reconstruit et reparité 48/48.
+      **Total après Phase 2** : 144 tests Rust (était 120 avant cette
+      phase), parité Rust/TS/wasm 48/48 inchangée, budget wasm gzippé
+      stable (~76.5 KiB sur 80 KiB de budget CI, aucune croissance
+      notable — aucun de ces trois items n'ajoute de code stdlib
+      lourd, contrairement aux items de formatage `f32` de Phase 1.1).
 
 ---
 

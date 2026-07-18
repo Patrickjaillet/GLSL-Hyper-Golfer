@@ -15,6 +15,8 @@
 //!      would otherwise fuse)
 
 mod aggressive;
+mod callgraph;
+mod expr;
 mod golfer;
 mod lexer;
 mod vocab;

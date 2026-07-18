@@ -1777,11 +1777,61 @@ function parseSimpleWrite(items: Token[], start: number): SimpleWrite | null {
 }
 
 /**
- * Drops a simple write when the *very next* statement is a plain
- * (non-declaring) simple write to the same name that doesn't itself
- * read that name — see the module docs above. A declaration's write is
- * reduced to a bare `<type> <ident>;` rather than dropped outright (its
- * declaration must survive; only the wasted initial value dies).
+ * Greedily parses a maximal run of consecutive simple-write statements
+ * starting at `start` — a straight-line "basic block" of the only
+ * statement shape this analysis understands. Stops (without failing)
+ * at the first statement that isn't itself a simple write: a branch,
+ * loop, function-call statement, compound assignment, or anything
+ * else. That boundary is exactly what keeps this a liveness analysis
+ * over straight-line code only — nothing on the far side of it is ever
+ * reasoned about.
+ */
+function parseWriteChain(items: Token[], start: number): SimpleWrite[] {
+  const chain: SimpleWrite[] = [];
+  let i = start;
+  for (;;) {
+    const w = parseSimpleWrite(items, i);
+    if (!w) break;
+    i = w.end;
+    chain.push(w);
+  }
+  return chain;
+}
+
+/**
+ * A write at index `i` in the chain is dead when some *later* write in
+ * the same straight-line run targets the same name, and nothing
+ * between the two reads it first. This is the intra-block liveness
+ * analysis ROADMAP.md Phase 2 asks for, generalizing the old "only the
+ * immediately next statement" check to the whole run: the value
+ * written at `i` is live only if it can still be observed before being
+ * overwritten, and within a straight-line block that's answerable
+ * exactly by scanning forward for the next same-name write and
+ * checking every write in between for a read (`rhsIdent`) of it —
+ * including the superseding write itself, since `x=x;` reads the very
+ * value it's about to overwrite.
+ */
+function findDeadWritesInChain(chain: SimpleWrite[]): Set<number> {
+  const dead = new Set<number>();
+  for (let i = 0; i < chain.length; i++) {
+    for (let j = i + 1; j < chain.length; j++) {
+      if (chain[j]!.name === chain[i]!.name) {
+        const readBeforeOverwrite = chain.slice(i + 1, j + 1).some((w) => w.rhsIdent === chain[i]!.name);
+        if (!readBeforeOverwrite) dead.add(i);
+        break; // `j` is the *nearest* same-name write; anything further is a separate question for `i`'s own dead-check, not this one.
+      }
+    }
+  }
+  return dead;
+}
+
+/**
+ * Drops every dead write found by `findDeadWritesInChain` across the
+ * whole straight-line run at once, rather than only ever looking one
+ * statement ahead — see the module docs above. A declaration's write
+ * is reduced to a bare `<type> <ident>;` rather than dropped outright
+ * (its declaration must survive; only the wasted initial value dies);
+ * a later, non-declaring dead write is dropped entirely.
  */
 function eliminateDeadStores(items: Token[], stats: AggressiveStats): Token[] {
   const out: Token[] = [];
@@ -1793,19 +1843,23 @@ function eliminateDeadStores(items: Token[], stats: AggressiveStats): Token[] {
   let depth = 0;
   while (i < items.length) {
     if (depth === 0) {
-      const write = parseSimpleWrite(items, i);
-      if (write) {
-        const next = parseSimpleWrite(items, write.end);
-        if (next && !next.isDecl && next.name === write.name && next.rhsIdent !== write.name) {
-          stats.deadStoresRemoved++;
-          if (write.isDecl) {
-            out.push(items[write.start]);
-            out.push(items[write.start + 1]);
-            out.push({ kind: "punct", text: ";", original: ";", spaceBefore: false });
+      const chain = parseWriteChain(items, i);
+      const dead = findDeadWritesInChain(chain);
+      if (dead.size > 0) {
+        chain.forEach((w, idx) => {
+          if (dead.has(idx)) {
+            stats.deadStoresRemoved++;
+            if (w.isDecl) {
+              out.push(items[w.start]!);
+              out.push(items[w.start + 1]!);
+              out.push({ kind: "punct", text: ";", original: ";", spaceBefore: false });
+            }
+          } else {
+            out.push(...items.slice(w.start, w.end));
           }
-          i = write.end;
-          continue;
-        }
+        });
+        i = chain.length > 0 ? chain[chain.length - 1]!.end : i;
+        continue;
       }
     }
     if (isPunct(items[i], "(") || isPunct(items[i], "[")) depth++;
