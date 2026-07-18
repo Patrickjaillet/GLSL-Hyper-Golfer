@@ -22,6 +22,11 @@ New entries are in English going forward (Development Conventions,
   `PROGRESS.md`.
 - **Standard GitHub repository files**: `CONTRIBUTING.md`,
   `.github/ISSUE_TEMPLATE/`, `.github/PULL_REQUEST_TEMPLATE.md`.
+- **`.github/workflows/release.yml`**: builds the web app and attaches
+  a `glsl-hyper-golfer-<tag>.zip` (the built `web/dist`) to the
+  matching GitHub release. Runs automatically on every tag push, or
+  manually (`workflow_dispatch`, with a tag input) to backfill an
+  existing release like `1.0.0`.
 
 ### Changed
 - LICENSE copyright holder updated to SANDEFJORD DEVELOPMENT.
